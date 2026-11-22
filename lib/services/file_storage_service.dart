@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../core/core.dart';
 import '../render/document_painter.dart';
 
-/// Service handling file open, save, SVG export, and PNG rendering.
+/// Service handling file open, save, SVG export, Lottie export, and PNG rendering.
 class FileStorageService {
   /// Opens an SVG file or `.svgb` project file and parses it into a [Document].
   static Future<Document?> openProjectOrSvg() async {
@@ -69,6 +69,25 @@ class FileStorageService {
       return uri?.toFilePath();
     } catch (e) {
       debugPrint('Error exporting SVG file: $e');
+      rethrow;
+    }
+  }
+
+  /// Exports document animation into Bodymovin / Lottie JSON format.
+  static Future<String?> exportLottieFile(Document document, {String defaultName = 'animation.json'}) async {
+    try {
+      final lottieStr = LottieExporter.export(document);
+      final bytes = Uint8List.fromList(utf8.encode(lottieStr));
+
+      final uri = await FilePicker.saveFile(
+        dialogTitle: 'Export Lottie Animation',
+        fileName: defaultName,
+        bytes: bytes,
+      );
+
+      return uri?.toFilePath();
+    } catch (e) {
+      debugPrint('Error exporting Lottie file: $e');
       rethrow;
     }
   }

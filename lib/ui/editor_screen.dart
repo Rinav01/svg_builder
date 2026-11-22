@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import '../core/core.dart';
+import '../services/database/auto_save_service.dart';
+import '../services/database/database.dart';
 import '../services/file_storage_service.dart';
 import 'canvas_view.dart';
 import 'editor_controller.dart';
+import 'editor_shortcuts.dart';
+import 'layers_panel.dart';
 import 'timeline_view.dart';
 
 class EditorScreen extends StatefulWidget {
@@ -14,16 +18,56 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderStateMixin {
   late final EditorController _controller;
+  late final AppDatabase _database;
+  late final AutoSaveService _autoSaveService;
+  bool _showLayersPanel = true;
 
   @override
   void initState() {
     super.initState();
     _controller = EditorController();
     _controller.attachTickerProvider(this);
+
+    _database = AppDatabase();
+    _autoSaveService = AutoSaveService(database: _database);
+
+    // Attach auto-save listener to document history changes
+    _controller.addListener(() {
+      _autoSaveService.scheduleAutoSave(_controller.document);
+    });
+
+    _checkRestoreDraft();
+  }
+
+  Future<void> _checkRestoreDraft() async {
+    try {
+      final latest = await _database.getLatestDraft();
+      if (latest != null && mounted) {
+        final doc = ProjectFormat.decode(latest.jsonContent);
+        // If the latest saved draft has content (e.g. shapes), prompt or restore
+        if (doc.layers.isNotEmpty && doc.layers.any((l) => l is GroupNode && l.children.isNotEmpty)) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Auto-restored draft: ${latest.name}'),
+              duration: const Duration(seconds: 3),
+              action: SnackBarAction(
+                label: 'Dismiss',
+                onPressed: () {},
+              ),
+            ),
+          );
+          _controller.reset(doc);
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to restore draft: $e');
+    }
   }
 
   @override
   void dispose() {
+    _autoSaveService.dispose();
+    _database.close();
     _controller.dispose();
     super.dispose();
   }
@@ -97,6 +141,23 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     }
   }
 
+  Future<void> _exportLottie() async {
+    try {
+      final path = await FileStorageService.exportLottieFile(_controller.document);
+      if (path != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Exported Lottie to $path')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export Lottie: $e')),
+        );
+      }
+    }
+  }
+
   void _showExportDialog() {
     final svgString = exportSvg(_controller.renderedDocument);
     showDialog(
@@ -125,9 +186,56 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF2C2C2C),
-      appBar: AppBar(
+    return Shortcuts(
+      shortcuts: EditorShortcuts.shortcuts,
+      child: Actions(
+        actions: {
+          UndoIntent: CallbackAction<UndoIntent>(
+            onInvoke: (_) => _controller.canUndo ? _controller.undo() : null,
+          ),
+          RedoIntent: CallbackAction<RedoIntent>(
+            onInvoke: (_) => _controller.canRedo ? _controller.redo() : null,
+          ),
+          SaveIntent: CallbackAction<SaveIntent>(
+            onInvoke: (_) => _saveProject(),
+          ),
+          DeleteSelectedIntent: CallbackAction<DeleteSelectedIntent>(
+            onInvoke: (_) {
+              for (final id in _controller.selectedNodeIds.toList()) {
+                _controller.deleteNode(id);
+              }
+              return null;
+            },
+          ),
+          GroupIntent: CallbackAction<GroupIntent>(
+            onInvoke: (_) => _controller.groupSelected(),
+          ),
+          SwitchToolIntent: CallbackAction<SwitchToolIntent>(
+            onInvoke: (intent) {
+              final tools = [
+                EditorTool.select,
+                EditorTool.pen,
+                EditorTool.rectangle,
+                EditorTool.ellipse,
+              ];
+              if (intent.toolIndex >= 0 && intent.toolIndex < tools.length) {
+                _controller.currentTool = tools[intent.toolIndex];
+              }
+              return null;
+            },
+          ),
+          NudgeIntent: CallbackAction<NudgeIntent>(
+            onInvoke: (intent) {
+              _controller.nudgeSelected(intent.dx, intent.dy);
+              return null;
+            },
+          ),
+        },
+        child: Focus(
+          autofocus: true,
+          child: Scaffold(
+            backgroundColor: const Color(0xFF2C2C2C),
+            appBar: AppBar(
         title: const Text('SVG Builder'),
         backgroundColor: const Color(0xFF1E1E1E),
         foregroundColor: Colors.white,
@@ -168,6 +276,8 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                 _exportSvg();
               } else if (val == 'png_file') {
                 _exportPng();
+              } else if (val == 'lottie_file') {
+                _exportLottie();
               } else if (val == 'svg_code') {
                 _showExportDialog();
               }
@@ -194,6 +304,16 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                 ),
               ),
               const PopupMenuItem(
+                value: 'lottie_file',
+                child: Row(
+                  children: [
+                    Icon(Icons.animation, size: 20, color: Colors.orangeAccent),
+                    SizedBox(width: 8),
+                    Text('Export Lottie JSON'),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
                 value: 'svg_code',
                 child: Row(
                   children: [
@@ -206,9 +326,16 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.code),
-            tooltip: 'Preview SVG Code',
-            onPressed: _showExportDialog,
+            icon: Icon(
+              Icons.layers,
+              color: _showLayersPanel ? Colors.blueAccent : Colors.white70,
+            ),
+            tooltip: 'Toggle Layers Panel',
+            onPressed: () {
+              setState(() {
+                _showLayersPanel = !_showLayersPanel;
+              });
+            },
           ),
           const SizedBox(width: 8),
         ],
@@ -224,13 +351,20 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                     child: CanvasView(controller: _controller),
                   ),
                 ),
+                if (_showLayersPanel)
+                  LayersPanel(
+                    controller: _controller,
+                    onClose: () => setState(() => _showLayersPanel = false),
+                  ),
               ],
             ),
           ),
-          // Bottom Animation Timeline
           TimelineView(controller: _controller),
         ],
       ),
+    ),
+    ),
+    ),
     );
   }
 
@@ -248,7 +382,12 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                 _toolButton(
                   icon: Icons.near_me_outlined,
                   tool: EditorTool.select,
-                  tooltip: 'Select / Inspect / Move',
+                  tooltip: 'Select / Move',
+                ),
+                _toolButton(
+                  icon: Icons.timeline,
+                  tool: EditorTool.nodeEdit,
+                  tooltip: 'Edit Nodes (Anchor & Control Points)',
                 ),
                 _toolButton(
                   icon: Icons.edit_outlined,

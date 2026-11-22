@@ -1,13 +1,22 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart' hide Easing;
 import 'package:flutter/scheduler.dart';
 import '../core/core.dart';
 import '../render/stroke_renderer.dart';
+import 'transform_handles.dart';
 
 enum EditorTool {
   select,
+  nodeEdit,
   pen,
   rectangle,
   ellipse,
+}
+
+enum TransformMode {
+  translate,
+  scale,
+  rotate,
 }
 
 /// Central controller bridging document state, timeline animation & history with Flutter UI.
@@ -51,6 +60,15 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleNodeSelection(String id) {
+    if (_selectedNodeIds.contains(id)) {
+      _selectedNodeIds.remove(id);
+    } else {
+      _selectedNodeIds.add(id);
+    }
+    notifyListeners();
+  }
+
   void clearSelection() {
     if (_selectedNodeIds.isNotEmpty) {
       _selectedNodeIds.clear();
@@ -69,10 +87,18 @@ class EditorController extends ChangeNotifier {
   Vec2? shapeDragStart;
   Vec2? shapeDragCurrent;
 
-  // --- Selection Transform Dragging ---
+  // --- Interactive Transform Dragging ---
+  TransformMode? transformMode;
+  HandleType? activeHandle;
   Vec2? transformDragStart;
   String? transformDragNodeId;
   Transform2D? transformDragInitial;
+  Bounds? transformDragInitialBounds;
+
+  // --- Path Node Direct Editing ---
+  String? activeNodeEditId;
+  PathPointHandle? activePathPointHandle;
+  PathData? initialPathData;
 
   // --- Timeline & Animation Playback ---
   double _currentTime = 0.0;
@@ -188,6 +214,106 @@ class EditorController extends ChangeNotifier {
       return document.layers.first.id;
     }
     return Document.rootId;
+  }
+
+  void nudgeSelected(double dx, double dy) {
+    if (_selectedNodeIds.isEmpty) return;
+    for (final id in _selectedNodeIds) {
+      final node = document.findById(id);
+      if (node == null) continue;
+      final cur = node.transform;
+      execute(
+        UpdateNodeCommand.from(
+          document,
+          id,
+          (n) => n.withBase(
+            transform: cur.copyWith(x: cur.x + dx, y: cur.y + dy),
+          ),
+          label: 'Nudge',
+          mergeKey: 'nudge-$id',
+        ),
+        merge: true,
+      );
+    }
+  }
+
+  // --- Layer Tree Actions ---
+  void addLayer({String? name}) {
+    final newLayer = GroupNode(
+      id: _idGen.next(),
+      name: name ?? 'Layer ${document.layers.length + 1}',
+    );
+    execute(AddNodeCommand(newLayer, parentId: Document.rootId), merge: false);
+  }
+
+  void toggleVisibility(String nodeId) {
+    final node = document.findById(nodeId);
+    if (node == null) return;
+    execute(
+      UpdateNodeCommand.from(
+        document,
+        nodeId,
+        (n) => n.withBase(visible: !n.visible),
+        label: 'Toggle Visibility',
+      ),
+      merge: false,
+    );
+  }
+
+  void toggleLock(String nodeId) {
+    final node = document.findById(nodeId);
+    if (node == null) return;
+    execute(
+      UpdateNodeCommand.from(
+        document,
+        nodeId,
+        (n) => n.withBase(locked: !n.locked),
+        label: 'Toggle Lock',
+      ),
+      merge: false,
+    );
+  }
+
+  void deleteNode(String nodeId) {
+    if (!document.contains(nodeId)) return;
+    _selectedNodeIds.remove(nodeId);
+    execute(RemoveNodeCommand(nodeId), merge: false);
+  }
+
+  void groupSelected() {
+    if (_selectedNodeIds.length < 2) return;
+    final parentId = document.locate(_selectedNodeIds.first)?.parentId ?? activeLayerId;
+    final nodesToGroup = _selectedNodeIds
+        .map(document.findById)
+        .whereType<Node>()
+        .toList();
+
+    final groupId = _idGen.next();
+    final group = GroupNode(
+      id: groupId,
+      name: 'Group',
+      children: nodesToGroup,
+    );
+
+    final commands = <Command>[
+      for (final n in nodesToGroup) RemoveNodeCommand(n.id),
+      AddNodeCommand(group, parentId: parentId),
+    ];
+
+    execute(BatchCommand('Group Elements', commands), merge: false);
+    _selectedNodeIds.clear();
+    _selectedNodeIds.add(groupId);
+    notifyListeners();
+  }
+
+  void reorderLayer(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= document.layers.length) return;
+    if (newIndex > oldIndex) newIndex -= 1;
+    final layer = document.layers[oldIndex];
+    execute(
+      MoveNodeCommand(layer.id, newParentId: Document.rootId, newIndex: newIndex),
+      merge: false,
+    );
   }
 
   // --- Stroke Handling ---
@@ -308,13 +434,64 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Transform / Translation Drag Handling ---
-  void beginTransformDrag(String nodeId, Vec2 startPoint) {
+  // --- Path Node Direct Editing Handling ---
+  void beginPathNodeDrag(String nodeId, PathPointHandle handle) {
+    final node = document.findById(nodeId);
+    if (node is! PathNode) return;
+
+    activeNodeEditId = nodeId;
+    activePathPointHandle = handle;
+    initialPathData = node.path;
+  }
+
+  void updatePathNodeDrag(Vec2 newLocalPos) {
+    if (activeNodeEditId == null || activePathPointHandle == null) return;
+    final node = document.findById(activeNodeEditId!);
+    if (node is! PathNode) return;
+
+    final updatedPath = PathNodeEditHelper.updatePoint(
+      node.path,
+      activePathPointHandle!.segmentIndex,
+      activePathPointHandle!.pointType,
+      newLocalPos,
+    );
+
+    execute(
+      UpdatePathGeometryCommand(
+        activeNodeEditId!,
+        initialPathData ?? node.path,
+        updatedPath,
+        mergeKey: 'edit-node-$activeNodeEditId-${activePathPointHandle!.segmentIndex}',
+      ),
+      merge: true,
+    );
+  }
+
+  void endPathNodeDrag() {
+    activeNodeEditId = null;
+    activePathPointHandle = null;
+    initialPathData = null;
+    commitMerge();
+  }
+
+  // --- Interactive Transform Drag Handling ---
+  void beginTransformDrag(String nodeId, Vec2 startPoint, {HandleType? handle}) {
     final node = document.findById(nodeId);
     if (node == null) return;
+
     transformDragNodeId = nodeId;
     transformDragStart = startPoint;
     transformDragInitial = node.transform;
+    transformDragInitialBounds = node.localBounds;
+    activeHandle = handle;
+
+    if (handle == null) {
+      transformMode = TransformMode.translate;
+    } else if (handle == HandleType.rotation) {
+      transformMode = TransformMode.rotate;
+    } else {
+      transformMode = TransformMode.scale;
+    }
   }
 
   void updateTransformDrag(Vec2 currentPoint) {
@@ -324,20 +501,65 @@ class EditorController extends ChangeNotifier {
       return;
     }
 
-    final delta = currentPoint - transformDragStart!;
     final initial = transformDragInitial!;
+    final b = transformDragInitialBounds ?? Bounds.empty;
+    Transform2D updatedTransform = initial;
 
-    final updatedTransform = initial.copyWith(
-      x: initial.x + delta.x,
-      y: initial.y + delta.y,
-    );
+    if (transformMode == TransformMode.translate) {
+      final delta = currentPoint - transformDragStart!;
+      updatedTransform = initial.copyWith(
+        x: initial.x + delta.x,
+        y: initial.y + delta.y,
+      );
+    } else if (transformMode == TransformMode.rotate) {
+      // Rotation relative to center
+      final center = Vec2(initial.x + b.center.x, initial.y + b.center.y);
+      final angleStart = math.atan2(transformDragStart!.y - center.y, transformDragStart!.x - center.x);
+      final angleCurrent = math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
+      final deltaDeg = (angleCurrent - angleStart) * 180 / math.pi;
+
+      updatedTransform = initial.copyWith(
+        originX: b.center.x,
+        originY: b.center.y,
+        rotation: (initial.rotation + deltaDeg) % 360,
+      );
+    } else if (transformMode == TransformMode.scale && activeHandle != null) {
+      final delta = currentPoint - transformDragStart!;
+      double sx = initial.scaleX;
+      double sy = initial.scaleY;
+
+      final w = b.width > 0 ? b.width : 10.0;
+      final h = b.height > 0 ? b.height : 10.0;
+
+      switch (activeHandle!) {
+        case HandleType.bottomRight:
+          sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
+          sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
+        case HandleType.bottomLeft:
+          sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
+          sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
+        case HandleType.topRight:
+          sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
+          sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
+        case HandleType.topLeft:
+          sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
+          sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
+        default:
+          break;
+      }
+
+      updatedTransform = initial.copyWith(
+        scaleX: sx,
+        scaleY: sy,
+      );
+    }
 
     execute(
       UpdateNodeCommand.from(
         document,
         transformDragNodeId!,
         (n) => n.withBase(transform: updatedTransform),
-        label: 'Move',
+        label: transformMode?.name ?? 'Transform',
         mergeKey: 'transform-$transformDragNodeId',
       ),
       merge: true,
@@ -348,6 +570,9 @@ class EditorController extends ChangeNotifier {
     transformDragNodeId = null;
     transformDragStart = null;
     transformDragInitial = null;
+    transformDragInitialBounds = null;
+    transformMode = null;
+    activeHandle = null;
     commitMerge();
   }
 

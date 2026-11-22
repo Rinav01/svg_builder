@@ -4,8 +4,9 @@ import '../core/core.dart';
 import '../render/document_painter.dart';
 import '../render/stroke_renderer.dart';
 import 'editor_controller.dart';
+import 'transform_handles.dart';
 
-/// Interactive drawing surface supporting Stylus (pressure, tilt), touch, and mouse.
+/// Interactive drawing surface supporting Stylus (pressure, tilt), touch pan/zoom, and mouse.
 class CanvasView extends StatefulWidget {
   const CanvasView({
     super.key,
@@ -26,7 +27,15 @@ class _CanvasViewState extends State<CanvasView> {
   // Active pointer tracking
   int? _activeDrawingPointer;
   bool _isDrawingWithStylus = false;
-  bool _isDraggingSelectedNode = false;
+  bool _isTransformingNode = false;
+  bool _isDraggingPathNode = false;
+
+  // Multi-touch gestures tracking for canvas Pan & Zoom
+  final Map<int, Offset> _touchPointers = {};
+  double _baseScale = 1.0;
+  Offset _baseOffset = Offset.zero;
+  double? _initialTouchDistance;
+  Offset? _initialTouchCenter;
 
   Vec2 _toDocCoords(Offset globalOffset, BoxConstraints constraints) {
     final renderBox = context.findRenderObject() as RenderBox?;
@@ -43,9 +52,23 @@ class _CanvasViewState extends State<CanvasView> {
     final isStylus = event.kind == PointerDeviceKind.stylus ||
         event.kind == PointerDeviceKind.invertedStylus;
 
-    if (_isDrawingWithStylus && !isStylus) {
-      return;
+    // Track touch pointers for two-finger pan/zoom
+    if (event.kind == PointerDeviceKind.touch) {
+      _touchPointers[event.pointer] = event.position;
+      if (_touchPointers.length >= 2) {
+        // Cancel single pointer drawing if another touch comes down
+        if (_activeDrawingPointer != null && !_isDrawingWithStylus) {
+          _cancelCurrentDrawing();
+        }
+        _initMultiTouch();
+        return;
+      }
     }
+
+    if (_touchPointers.length >= 2) return;
+
+    // Palm rejection: reject finger touch while drawing with stylus
+    if (_isDrawingWithStylus && !isStylus) return;
 
     if (_activeDrawingPointer == null) {
       _activeDrawingPointer = event.pointer;
@@ -70,11 +93,22 @@ class _CanvasViewState extends State<CanvasView> {
           widget.controller.beginShape(docPoint);
         case EditorTool.select:
           _handleSelectionDown(docPoint);
+        case EditorTool.nodeEdit:
+          _handleNodeEditDown(docPoint);
       }
     }
   }
 
   void _onPointerMove(PointerMoveEvent event) {
+    // Multi-touch Pan & Zoom handling
+    if (_touchPointers.containsKey(event.pointer)) {
+      _touchPointers[event.pointer] = event.position;
+      if (_touchPointers.length >= 2) {
+        _updateMultiTouch();
+        return;
+      }
+    }
+
     if (event.pointer != _activeDrawingPointer) return;
 
     final docPoint = _toDocCoords(event.position, const BoxConstraints());
@@ -95,22 +129,66 @@ class _CanvasViewState extends State<CanvasView> {
       case EditorTool.ellipse:
         widget.controller.updateShape(docPoint);
       case EditorTool.select:
-        if (_isDraggingSelectedNode) {
+        if (_isTransformingNode) {
           widget.controller.updateTransformDrag(docPoint);
+        }
+      case EditorTool.nodeEdit:
+        if (_isDraggingPathNode) {
+          _updatePathNodeDrag(docPoint);
         }
     }
   }
 
   void _onPointerUp(PointerUpEvent event) {
+    _touchPointers.remove(event.pointer);
+    if (_touchPointers.length < 2) {
+      _initialTouchDistance = null;
+      _initialTouchCenter = null;
+    }
+
     if (event.pointer == _activeDrawingPointer) {
       _finishPointer();
     }
   }
 
   void _onPointerCancel(PointerCancelEvent event) {
+    _touchPointers.remove(event.pointer);
     if (event.pointer == _activeDrawingPointer) {
       _finishPointer();
     }
+  }
+
+  void _initMultiTouch() {
+    final pts = _touchPointers.values.toList();
+    if (pts.length >= 2) {
+      _initialTouchDistance = (pts[0] - pts[1]).distance;
+      _initialTouchCenter = (pts[0] + pts[1]) / 2;
+      _baseScale = _viewportScale;
+      _baseOffset = _viewportOffset;
+    }
+  }
+
+  void _updateMultiTouch() {
+    final pts = _touchPointers.values.toList();
+    if (pts.length < 2 || _initialTouchDistance == null || _initialTouchCenter == null) return;
+
+    final currentDistance = (pts[0] - pts[1]).distance;
+    final currentCenter = (pts[0] + pts[1]) / 2;
+
+    setState(() {
+      final scaleFactor = (currentDistance / _initialTouchDistance!).clamp(0.2, 5.0);
+      _viewportScale = (_baseScale * scaleFactor).clamp(0.1, 10.0);
+
+      final translationDelta = currentCenter - _initialTouchCenter!;
+      _viewportOffset = _baseOffset + translationDelta;
+    });
+  }
+
+  void _cancelCurrentDrawing() {
+    _activeDrawingPointer = null;
+    _isDrawingWithStylus = false;
+    _isTransformingNode = false;
+    widget.controller.endTransformDrag();
   }
 
   void _finishPointer() {
@@ -124,32 +202,96 @@ class _CanvasViewState extends State<CanvasView> {
       case EditorTool.ellipse:
         widget.controller.endShape();
       case EditorTool.select:
-        if (_isDraggingSelectedNode) {
+        if (_isTransformingNode) {
           widget.controller.endTransformDrag();
-          _isDraggingSelectedNode = false;
+          _isTransformingNode = false;
+        }
+      case EditorTool.nodeEdit:
+        if (_isDraggingPathNode) {
+          widget.controller.endPathNodeDrag();
+          _isDraggingPathNode = false;
         }
     }
   }
 
-  void _handleSelectionDown(Vec2 point) {
-    // 1. If we clicked inside an already-selected node, initiate drag move
+  void _handleNodeEditDown(Vec2 docPoint) {
     for (final id in widget.controller.selectedNodeIds) {
       final node = widget.controller.document.findById(id);
-      if (node is ShapeNode &&
-          (node.toPath().containsPoint(point) ||
-              node.toPath().hitTestStroke(point, 8.0))) {
-        _isDraggingSelectedNode = true;
-        widget.controller.beginTransformDrag(id, point);
+      if (node is! PathNode) continue;
+
+      final ancestry = widget.controller.document.ancestry(id);
+      final fullMatrix = concatTransforms(ancestry);
+      if (!fullMatrix.isInvertible) continue;
+
+      final localPoint = fullMatrix.inverted().apply(docPoint);
+      final handle = PathNodeEditHelper.hitTestHandle(
+        node.path,
+        localPoint,
+        scale: _viewportScale,
+      );
+
+      if (handle != null) {
+        _isDraggingPathNode = true;
+        widget.controller.beginPathNodeDrag(id, handle);
+        return;
+      }
+    }
+  }
+
+  void _updatePathNodeDrag(Vec2 docPoint) {
+    final activeId = widget.controller.activeNodeEditId;
+    if (activeId == null) return;
+
+    final ancestry = widget.controller.document.ancestry(activeId);
+    final fullMatrix = concatTransforms(ancestry);
+    if (!fullMatrix.isInvertible) return;
+
+    final localPoint = fullMatrix.inverted().apply(docPoint);
+    widget.controller.updatePathNodeDrag(localPoint);
+  }
+
+  void _handleSelectionDown(Vec2 docPoint) {
+    // 1. Check if we hit any handle (Scale / Rotate) of an already selected node
+    for (final id in widget.controller.selectedNodeIds) {
+      final node = widget.controller.document.findById(id);
+      if (node == null) continue;
+
+      final ancestry = widget.controller.document.ancestry(id);
+      final fullMatrix = concatTransforms(ancestry);
+      if (!fullMatrix.isInvertible) continue;
+
+      final localPoint = fullMatrix.inverted().apply(docPoint);
+      final handle = SelectionTransformHelper.hitTestHandle(
+        node.localBounds,
+        localPoint,
+        scale: _viewportScale,
+      );
+
+      if (handle != null) {
+        _isTransformingNode = true;
+        widget.controller.beginTransformDrag(id, docPoint, handle: handle);
         return;
       }
     }
 
-    // 2. Otherwise hit-test top-most shape
+    // 2. Check if we clicked inside an already-selected shape (for translation drag)
+    for (final id in widget.controller.selectedNodeIds) {
+      final node = widget.controller.document.findById(id);
+      if (node is ShapeNode &&
+          (node.toPath().containsPoint(docPoint) ||
+              node.toPath().hitTestStroke(docPoint, 8.0 / _viewportScale))) {
+        _isTransformingNode = true;
+        widget.controller.beginTransformDrag(id, docPoint);
+        return;
+      }
+    }
+
+    // 3. Otherwise hit-test top-most shape in document
     Node? hit;
     for (final node in widget.controller.document.walk()) {
       if (node is ShapeNode && node.visible && !node.locked) {
-        if (node.toPath().containsPoint(point) ||
-            node.toPath().hitTestStroke(point, 6.0)) {
+        if (node.toPath().containsPoint(docPoint) ||
+            node.toPath().hitTestStroke(docPoint, 6.0 / _viewportScale)) {
           hit = node;
         }
       }
@@ -157,11 +299,11 @@ class _CanvasViewState extends State<CanvasView> {
 
     if (hit != null) {
       widget.controller.selectNode(hit.id);
-      _isDraggingSelectedNode = true;
-      widget.controller.beginTransformDrag(hit.id, point);
+      _isTransformingNode = true;
+      widget.controller.beginTransformDrag(hit.id, docPoint);
     } else {
       widget.controller.clearSelection();
-      _isDraggingSelectedNode = false;
+      _isTransformingNode = false;
     }
   }
 
@@ -187,6 +329,7 @@ class _CanvasViewState extends State<CanvasView> {
                   painter: DocumentPainter(
                     document: widget.controller.renderedDocument,
                     selectedNodeIds: widget.controller.selectedNodeIds,
+                    isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
                   ),
                   foregroundPainter: ActiveStrokePainter(
                     samples: widget.controller.activeStroke,
