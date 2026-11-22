@@ -8,6 +8,11 @@ import '../render/document_painter.dart';
 
 /// Service handling file open, save, SVG export, Lottie export, and PNG rendering.
 class FileStorageService {
+  static String? _uriToSafePath(Uri? uri) {
+    if (uri == null) return null;
+    return uri.isScheme('file') ? uri.toFilePath() : uri.toString();
+  }
+
   /// Opens an SVG file or `.svgb` project file and parses it into a [Document].
   static Future<Document?> openProjectOrSvg() async {
     try {
@@ -47,7 +52,7 @@ class FileStorageService {
         bytes: bytes,
       );
 
-      return uri?.toFilePath();
+      return _uriToSafePath(uri);
     } catch (e) {
       debugPrint('Error saving project file: $e');
       rethrow;
@@ -66,7 +71,7 @@ class FileStorageService {
         bytes: bytes,
       );
 
-      return uri?.toFilePath();
+      return _uriToSafePath(uri);
     } catch (e) {
       debugPrint('Error exporting SVG file: $e');
       rethrow;
@@ -85,7 +90,7 @@ class FileStorageService {
         bytes: bytes,
       );
 
-      return uri?.toFilePath();
+      return _uriToSafePath(uri);
     } catch (e) {
       debugPrint('Error exporting Lottie file: $e');
       rethrow;
@@ -126,7 +131,7 @@ class FileStorageService {
         bytes: bytes,
       );
 
-      return uri?.toFilePath();
+      return _uriToSafePath(uri);
     } catch (e) {
       debugPrint('Error exporting PNG file: $e');
       rethrow;

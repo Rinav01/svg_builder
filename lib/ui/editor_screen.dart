@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import '../config/feature_flags.dart';
 import '../core/core.dart';
+import '../services/collaboration/collaboration_service.dart';
 import '../services/database/auto_save_service.dart';
 import '../services/database/database.dart';
 import '../services/file_storage_service.dart';
 import 'canvas_view.dart';
+import 'color_picker_dialog.dart';
 import 'editor_controller.dart';
 import 'editor_shortcuts.dart';
-import 'layers_panel.dart';
+import 'right_sidebar.dart';
 import 'timeline_view.dart';
 
 class EditorScreen extends StatefulWidget {
@@ -20,7 +23,8 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   late final EditorController _controller;
   late final AppDatabase _database;
   late final AutoSaveService _autoSaveService;
-  bool _showLayersPanel = true;
+  CollaborationService? _collabService;
+  bool _showSidebar = true;
 
   @override
   void initState() {
@@ -31,10 +35,30 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     _database = AppDatabase();
     _autoSaveService = AutoSaveService(database: _database);
 
-    // Attach auto-save listener to document history changes
-    _controller.addListener(() {
-      _autoSaveService.scheduleAutoSave(_controller.document);
-    });
+    if (FeatureFlags.enableCollaboration) {
+      final randomId = 'user_${DateTime.now().millisecondsSinceEpoch % 10000}';
+      _collabService = CollaborationService(
+        clientId: randomId,
+        displayName: 'User ${randomId.split('_').last}',
+        clientColor: const RgbaColor(0xFF2196F3),
+      );
+
+      // Sync remote operations into document state
+      _collabService!.onRemoteOperation.listen((op) {
+        final updated = _collabService!.reconciler.apply(_controller.document, op);
+        _controller.reset(updated);
+      });
+
+      // Update peer cursors/presence
+      _collabService!.onPresenceUpdate.listen((peers) {
+        _controller.updatePeerPresences(peers.values.toList());
+      });
+    }
+
+    // Attach auto-save listener exclusively to document history changes (avoiding playback tick spam)
+    _controller.onDocumentChanged = (doc) {
+      _autoSaveService.scheduleAutoSave(doc);
+    };
 
     _checkRestoreDraft();
   }
@@ -66,6 +90,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    _collabService?.dispose();
     _autoSaveService.dispose();
     _database.close();
     _controller.dispose();
@@ -199,13 +224,17 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
           SaveIntent: CallbackAction<SaveIntent>(
             onInvoke: (_) => _saveProject(),
           ),
+          CopyIntent: CallbackAction<CopyIntent>(
+            onInvoke: (_) => _controller.copySelected(),
+          ),
+          PasteIntent: CallbackAction<PasteIntent>(
+            onInvoke: (_) => _controller.paste(),
+          ),
+          DuplicateIntent: CallbackAction<DuplicateIntent>(
+            onInvoke: (_) => _controller.duplicateSelected(),
+          ),
           DeleteSelectedIntent: CallbackAction<DeleteSelectedIntent>(
-            onInvoke: (_) {
-              for (final id in _controller.selectedNodeIds.toList()) {
-                _controller.deleteNode(id);
-              }
-              return null;
-            },
+            onInvoke: (_) => _controller.deleteSelected(),
           ),
           GroupIntent: CallbackAction<GroupIntent>(
             onInvoke: (_) => _controller.groupSelected(),
@@ -214,9 +243,12 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
             onInvoke: (intent) {
               final tools = [
                 EditorTool.select,
+                EditorTool.nodeEdit,
                 EditorTool.pen,
+                EditorTool.eraser,
                 EditorTool.rectangle,
                 EditorTool.ellipse,
+                EditorTool.text,
               ];
               if (intent.toolIndex >= 0 && intent.toolIndex < tools.length) {
                 _controller.currentTool = tools[intent.toolIndex];
@@ -325,15 +357,33 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
               ),
             ],
           ),
+          if (FeatureFlags.enableCollaboration)
+            IconButton(
+              icon: const Icon(Icons.people_outline),
+              tooltip: 'Live Collaboration Session',
+              onPressed: () {
+                final cs = _collabService;
+                if (cs == null) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      cs.isConnected
+                          ? 'Collaborating online with ${_controller.peerPresences.length} peers'
+                          : 'Offline-ready CRDT session active (ID: ${cs.clientId})',
+                    ),
+                  ),
+                );
+              },
+            ),
           IconButton(
             icon: Icon(
-              Icons.layers,
-              color: _showLayersPanel ? Colors.blueAccent : Colors.white70,
+              Icons.view_sidebar_outlined,
+              color: _showSidebar ? Colors.blueAccent : Colors.white70,
             ),
-            tooltip: 'Toggle Layers Panel',
+            tooltip: 'Toggle Sidebar (Layers & Properties)',
             onPressed: () {
               setState(() {
-                _showLayersPanel = !_showLayersPanel;
+                _showSidebar = !_showSidebar;
               });
             },
           ),
@@ -351,10 +401,10 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                     child: CanvasView(controller: _controller),
                   ),
                 ),
-                if (_showLayersPanel)
-                  LayersPanel(
+                if (_showSidebar)
+                  RightSidebar(
                     controller: _controller,
-                    onClose: () => setState(() => _showLayersPanel = false),
+                    onClose: () => setState(() => _showSidebar = false),
                   ),
               ],
             ),
@@ -382,7 +432,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                 _toolButton(
                   icon: Icons.near_me_outlined,
                   tool: EditorTool.select,
-                  tooltip: 'Select / Move',
+                  tooltip: 'Select / Move (V)',
                 ),
                 _toolButton(
                   icon: Icons.timeline,
@@ -392,17 +442,51 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                 _toolButton(
                   icon: Icons.edit_outlined,
                   tool: EditorTool.pen,
-                  tooltip: 'Stylus Freehand Pen',
+                  tooltip: 'Stylus Freehand Pen (P)',
+                ),
+                _toolButton(
+                  icon: Icons.auto_fix_normal_outlined,
+                  tool: EditorTool.eraser,
+                  tooltip: 'Stroke Eraser (E)',
                 ),
                 _toolButton(
                   icon: Icons.crop_square,
                   tool: EditorTool.rectangle,
-                  tooltip: 'Rectangle',
+                  tooltip: 'Rectangle (R)',
                 ),
                 _toolButton(
                   icon: Icons.circle_outlined,
                   tool: EditorTool.ellipse,
-                  tooltip: 'Ellipse',
+                  tooltip: 'Ellipse (O)',
+                ),
+                _toolButton(
+                  icon: Icons.title,
+                  tool: EditorTool.text,
+                  tooltip: 'Text Label (T)',
+                ),
+                const SizedBox(height: 8),
+                IconButton(
+                  icon: Icon(
+                    _controller.penOnlyMode ? Icons.draw : Icons.touch_app,
+                    color: _controller.penOnlyMode ? Colors.blueAccent : Colors.white70,
+                    size: 20,
+                  ),
+                  tooltip: _controller.penOnlyMode
+                      ? 'Pen-only Mode ON (Fingers navigate, stylus draws)'
+                      : 'Touch Inking Mode ON (Fingers can also draw)',
+                  onPressed: () {
+                    setState(() {
+                      _controller.penOnlyMode = !_controller.penOnlyMode;
+                    });
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(_controller.penOnlyMode
+                            ? 'Pen-Only Mode: Fingers pan/zoom, Stylus inks'
+                            : 'Touch Inking Enabled: Fingers can draw'),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  },
                 ),
                 const Divider(color: Colors.white24, height: 24),
                 ..._colorSwatches(),
@@ -444,28 +528,58 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
       const RgbaColor(0xFFFB8C00),
     ];
 
-    return colors.map((c) {
+    final widgets = <Widget>[];
+
+    for (final c in colors) {
       final isSelected = _controller.primaryColor == c;
-      return GestureDetector(
-        onTap: () {
-          setState(() {
-            _controller.primaryColor = c;
-          });
-        },
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: Color(c.value),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: isSelected ? Colors.white : Colors.white24,
-              width: isSelected ? 2.5 : 1.0,
+      widgets.add(
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _controller.primaryColor = c;
+            });
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 6),
+            width: 28,
+            height: 28,
+            decoration: BoxDecoration(
+              color: Color(c.value),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isSelected ? Colors.white : Colors.white24,
+                width: isSelected ? 2.5 : 1.0,
+              ),
             ),
           ),
         ),
       );
-    }).toList();
+    }
+
+    // Custom color picker button
+    widgets.add(
+      Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: IconButton(
+          icon: const Icon(Icons.colorize, size: 20),
+          tooltip: 'Custom Color (HSV Picker)',
+          color: Colors.white70,
+          onPressed: () async {
+            final picked = await ColorPickerDialog.show(
+              context,
+              initialColor: _controller.primaryColor,
+              documentColors: _controller.documentColors,
+            );
+            if (picked != null) {
+              setState(() {
+                _controller.primaryColor = picked;
+              });
+            }
+          },
+        ),
+      ),
+    );
+
+    return widgets;
   }
 }

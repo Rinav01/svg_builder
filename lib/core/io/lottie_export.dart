@@ -100,7 +100,7 @@ class LottieExporter {
     if (scaleTrackX != null || scaleTrackY != null) {
       scale = {
         'a': 1,
-        'k': _animatedVector2(scaleTrackX, scaleTrackY, t.scaleX * 100, t.scaleY * 100, fps, multiplier: 100.0),
+        'k': _animatedVector2(scaleTrackX, scaleTrackY, t.scaleX, t.scaleY, fps, multiplier: 100.0, zValue: 100.0),
       };
     } else {
       scale = {
@@ -262,6 +262,7 @@ class LottieExporter {
     double baseY,
     double fps, {
     double multiplier = 1.0,
+    double zValue = 0.0,
   }) {
     final times = <double>{};
     if (trackX != null) times.addAll(trackX.keyframes.map((k) => k.time));
@@ -276,7 +277,7 @@ class LottieExporter {
           's': [
             (trackX?.valueAt(t) ?? baseX) * multiplier,
             (trackY?.valueAt(t) ?? baseY) * multiplier,
-            0.0,
+            zValue,
           ],
         },
     ];

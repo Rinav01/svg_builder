@@ -1,4 +1,5 @@
 import '../animation/track.dart';
+import '../geometry/vec2.dart';
 import 'color.dart';
 import 'node.dart';
 
@@ -103,6 +104,38 @@ class Document {
     }
 
     return search(root, const []) ?? const [];
+  }
+
+  /// Hit-tests the top-most visible and unlocked shape node under [point] (in document coords).
+  ///
+  /// Converts [point] into the local coordinate space of each shape node using the
+  /// inverse of its full ancestral transform hierarchy.
+  Node? hitTest(Vec2 point, {double strokeTolerance = 4.0}) {
+    for (final node in walk().toList().reversed) {
+      if (!node.visible || node.locked) continue;
+
+      final ancestryChain = ancestry(node.id);
+      // Ensure no ancestor is hidden or locked
+      final ancestorBlocked = ancestryChain.any((a) => !a.visible || a.locked);
+      if (ancestorBlocked) continue;
+
+      final fullMatrix = concatTransforms(ancestryChain);
+      if (!fullMatrix.isInvertible) continue;
+
+      final localPoint = fullMatrix.inverted().apply(point);
+
+      if (node is ShapeNode) {
+        final path = node.toPath();
+        if (path.containsPoint(localPoint) || path.hitTestStroke(localPoint, strokeTolerance)) {
+          return node;
+        }
+      } else if (node is TextNode) {
+        if (node.localBounds.containsPoint(localPoint)) {
+          return node;
+        }
+      }
+    }
+    return null;
   }
 
   Document copyWith({

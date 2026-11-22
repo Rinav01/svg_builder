@@ -9,8 +9,10 @@ enum EditorTool {
   select,
   nodeEdit,
   pen,
+  eraser,
   rectangle,
   ellipse,
+  text,
 }
 
 enum TransformMode {
@@ -33,12 +35,25 @@ class EditorController extends ChangeNotifier {
               ),
         ) {
     _history.onChanged = (doc) {
+      onDocumentChanged?.call(doc);
       notifyListeners();
     };
   }
 
   final History _history;
-  final IdGenerator _idGen = IdGenerator('elem');
+  IdGenerator _idGen = IdGenerator();
+
+  /// Callback fired only when a command mutates the document (e.g. for debounced auto-save).
+  void Function(Document doc)? onDocumentChanged;
+
+  /// Generates a unique node ID guaranteed not to collide with any ID in the document.
+  String nextId() {
+    String id;
+    do {
+      id = _idGen.next();
+    } while (document.contains(id));
+    return id;
+  }
 
   // --- Tool State ---
   EditorTool _currentTool = EditorTool.pen;
@@ -53,12 +68,16 @@ class EditorController extends ChangeNotifier {
   // --- Selection State ---
   final Set<String> _selectedNodeIds = {};
   Set<String> get selectedNodeIds => Set.unmodifiable(_selectedNodeIds);
+  List<Node> get selectedNodes =>
+      _selectedNodeIds.map(document.findById).whereType<Node>().toList();
 
   void selectNode(String id, {bool multi = false}) {
     if (!multi) _selectedNodeIds.clear();
     _selectedNodeIds.add(id);
     notifyListeners();
   }
+
+  void selectOnly(String id) => selectNode(id, multi: false);
 
   void toggleNodeSelection(String id) {
     if (_selectedNodeIds.contains(id)) {
@@ -80,6 +99,12 @@ class EditorController extends ChangeNotifier {
   double brushSize = 8.0;
   RgbaColor primaryColor = const RgbaColor(0xFF000000);
 
+  /// When true, finger touch navigates/pans/zooms/selects while the stylus draws.
+  bool penOnlyMode = true;
+
+  /// High-frequency notifier for active inking points, isolating canvas repaints from UI panels.
+  final ValueNotifier<List<StrokeSample>> activeStrokeNotifier = ValueNotifier<List<StrokeSample>>([]);
+
   // --- Active Drawing Gestures ---
   final List<StrokeSample> _activeStroke = [];
   List<StrokeSample> get activeStroke => List.unmodifiable(_activeStroke);
@@ -99,6 +124,15 @@ class EditorController extends ChangeNotifier {
   String? activeNodeEditId;
   PathPointHandle? activePathPointHandle;
   PathData? initialPathData;
+
+  // --- Real-Time Collaboration Presence ---
+  List<PeerPresence> _peerPresences = const [];
+  List<PeerPresence> get peerPresences => _peerPresences;
+
+  void updatePeerPresences(List<PeerPresence> presences) {
+    _peerPresences = List.unmodifiable(presences);
+    notifyListeners();
+  }
 
   // --- Timeline & Animation Playback ---
   double _currentTime = 0.0;
@@ -195,6 +229,7 @@ class EditorController extends ChangeNotifier {
   void redo() => _history.redo();
 
   void reset(Document newDocument) {
+    _idGen = IdGenerator();
     _history.reset(newDocument);
     _selectedNodeIds.clear();
     _activeStroke.clear();
@@ -209,11 +244,323 @@ class EditorController extends ChangeNotifier {
 
   void commitMerge() => _history.commitMerge();
 
+  // --- Active Layer & Hierarchy ---
+  String? _activeLayerId;
   String get activeLayerId {
+    if (_activeLayerId != null && document.contains(_activeLayerId!)) {
+      return _activeLayerId!;
+    }
     if (document.layers.isNotEmpty) {
       return document.layers.first.id;
     }
     return Document.rootId;
+  }
+
+  void setActiveLayer(String layerId) {
+    if (document.contains(layerId)) {
+      _activeLayerId = layerId;
+      notifyListeners();
+    }
+  }
+
+  // --- Clipboard Actions ---
+  List<Node> _clipboardNodes = [];
+  List<Node> get clipboardNodes => List.unmodifiable(_clipboardNodes);
+  bool get canPaste => _clipboardNodes.isNotEmpty;
+
+  /// Unique colors extracted from document styles, fills, and background.
+  List<RgbaColor> get documentColors {
+    final colors = <RgbaColor>{};
+    if (document.background != null) colors.add(document.background!);
+    for (final n in document.walk()) {
+      if (n is ShapeNode) {
+        if (n.style.fill != null) colors.add(n.style.fill!);
+        if (n.style.stroke != null) colors.add(n.style.stroke!);
+      } else if (n is TextNode) {
+        if (n.fill != null) colors.add(n.fill!);
+      }
+    }
+    return colors.toList();
+  }
+
+  void copySelected() {
+    if (_selectedNodeIds.isEmpty) return;
+    _clipboardNodes = _selectedNodeIds
+        .map(document.findById)
+        .whereType<Node>()
+        .toList();
+    notifyListeners();
+  }
+
+  void cutSelected() {
+    copySelected();
+    deleteSelected();
+  }
+
+  void paste() {
+    if (_clipboardNodes.isEmpty) return;
+
+    final commands = <Command>[];
+    final newSelectedIds = <String>{};
+
+    for (final node in _clipboardNodes) {
+      final newId = nextId();
+      final curTransform = node.transform;
+      final offsetTransform = curTransform.copyWith(
+        x: curTransform.x + 20,
+        y: curTransform.y + 20,
+      );
+
+      final duplicatedNode = _cloneNodeWithNewId(node, newId, offsetTransform);
+      commands.add(AddNodeCommand(duplicatedNode, parentId: activeLayerId));
+      newSelectedIds.add(newId);
+    }
+
+    execute(BatchCommand('Paste', commands), merge: false);
+    _selectedNodeIds.clear();
+    _selectedNodeIds.addAll(newSelectedIds);
+    notifyListeners();
+  }
+
+  void duplicateSelected() {
+    if (_selectedNodeIds.isEmpty) return;
+    copySelected();
+    paste();
+  }
+
+  void deleteSelected() {
+    if (_selectedNodeIds.isEmpty) return;
+    final commands = [
+      for (final id in _selectedNodeIds) RemoveNodeCommand(id),
+    ];
+    _selectedNodeIds.clear();
+    execute(BatchCommand('Delete Selected', commands), merge: false);
+    notifyListeners();
+  }
+
+  void ungroupSelected() {
+    if (_selectedNodeIds.isEmpty) return;
+    final commands = <Command>[];
+    final newlySelected = <String>{};
+
+    for (final id in _selectedNodeIds.toList()) {
+      final node = document.findById(id);
+      if (node is GroupNode) {
+        final loc = document.locate(id);
+        if (loc == null) continue;
+        final parentId = loc.parentId;
+        var insertIndex = loc.index;
+
+        commands.add(RemoveNodeCommand(id));
+        for (final child in node.children) {
+          commands.add(AddNodeCommand(child, parentId: parentId, index: insertIndex++));
+          newlySelected.add(child.id);
+        }
+      }
+    }
+
+    if (commands.isNotEmpty) {
+      execute(BatchCommand('Ungroup', commands), merge: false);
+      _selectedNodeIds.clear();
+      _selectedNodeIds.addAll(newlySelected);
+      notifyListeners();
+    }
+  }
+
+  Node _cloneNodeWithNewId(Node node, String newId, Transform2D newTransform) {
+    if (node is RectNode) {
+      return RectNode(
+        id: newId,
+        name: '${node.name} Copy',
+        transform: newTransform,
+        opacity: node.opacity,
+        visible: node.visible,
+        locked: node.locked,
+        style: node.style,
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        cornerRadius: node.cornerRadius,
+      );
+    } else if (node is EllipseNode) {
+      return EllipseNode(
+        id: newId,
+        name: '${node.name} Copy',
+        transform: newTransform,
+        opacity: node.opacity,
+        visible: node.visible,
+        locked: node.locked,
+        style: node.style,
+        cx: node.cx,
+        cy: node.cy,
+        rx: node.rx,
+        ry: node.ry,
+      );
+    } else if (node is PathNode) {
+      return PathNode(
+        id: newId,
+        name: '${node.name} Copy',
+        transform: newTransform,
+        opacity: node.opacity,
+        visible: node.visible,
+        locked: node.locked,
+        style: node.style,
+        path: node.path,
+        samples: node.samples,
+      );
+    } else if (node is TextNode) {
+      return TextNode(
+        id: newId,
+        name: '${node.name} Copy',
+        transform: newTransform,
+        opacity: node.opacity,
+        visible: node.visible,
+        locked: node.locked,
+        text: node.text,
+        x: node.x,
+        y: node.y,
+        fontSize: node.fontSize,
+        fontFamily: node.fontFamily,
+        fill: node.fill,
+      );
+    } else if (node is GroupNode) {
+      return GroupNode(
+        id: newId,
+        name: '${node.name} Copy',
+        transform: newTransform,
+        opacity: node.opacity,
+        visible: node.visible,
+        locked: node.locked,
+        children: node.children.map((c) => _cloneNodeWithNewId(c, nextId(), c.transform)).toList(),
+      );
+    }
+    return node.withBase(transform: newTransform);
+  }
+
+  // --- Z-Ordering Actions ---
+  void bringForward([String? nodeId]) {
+    final id = nodeId ?? (_selectedNodeIds.isNotEmpty ? _selectedNodeIds.first : null);
+    if (id == null) return;
+    final loc = document.locate(id);
+    if (loc == null) return;
+    final parent = document.findById(loc.parentId);
+    if (parent is! GroupNode) return;
+    if (loc.index < parent.children.length - 1) {
+      execute(
+        MoveNodeCommand(id, newParentId: loc.parentId, newIndex: loc.index + 1),
+        merge: false,
+      );
+    }
+  }
+
+  void sendBackward([String? nodeId]) {
+    final id = nodeId ?? (_selectedNodeIds.isNotEmpty ? _selectedNodeIds.first : null);
+    if (id == null) return;
+    final loc = document.locate(id);
+    if (loc == null) return;
+    if (loc.index > 0) {
+      execute(
+        MoveNodeCommand(id, newParentId: loc.parentId, newIndex: loc.index - 1),
+        merge: false,
+      );
+    }
+  }
+
+  void bringToFront([String? nodeId]) {
+    final id = nodeId ?? (_selectedNodeIds.isNotEmpty ? _selectedNodeIds.first : null);
+    if (id == null) return;
+    final loc = document.locate(id);
+    if (loc == null) return;
+    final parent = document.findById(loc.parentId);
+    if (parent is! GroupNode) return;
+    execute(
+      MoveNodeCommand(id, newParentId: loc.parentId, newIndex: parent.children.length - 1),
+      merge: false,
+    );
+  }
+
+  void sendToBack([String? nodeId]) {
+    final id = nodeId ?? (_selectedNodeIds.isNotEmpty ? _selectedNodeIds.first : null);
+    if (id == null) return;
+    final loc = document.locate(id);
+    if (loc == null) return;
+    execute(
+      MoveNodeCommand(id, newParentId: loc.parentId, newIndex: 0),
+      merge: false,
+    );
+  }
+
+  // --- Node Property Updaters ---
+  void updateNode(String nodeId, Node Function(Node) updater, {String label = 'Edit Property'}) {
+    if (!document.contains(nodeId)) return;
+    execute(
+      UpdateNodeCommand.from(
+        document,
+        nodeId,
+        updater,
+        label: label,
+      ),
+      merge: false,
+    );
+  }
+
+  void replaceNode(Node updatedNode, {String label = 'Edit Property'}) {
+    updateNode(updatedNode.id, (_) => updatedNode, label: label);
+  }
+
+  String addTextNode(Vec2 pos, {String text = 'Text', double fontSize = 24.0}) {
+    final id = nextId();
+    final node = TextNode(
+      id: id,
+      name: 'Text',
+      text: text,
+      x: pos.x,
+      y: pos.y,
+      fontSize: fontSize,
+      fill: primaryColor,
+    );
+    execute(AddNodeCommand(node, parentId: activeLayerId), merge: false);
+    selectNode(node.id);
+    return id;
+  }
+
+  String insertRectangle(Vec2 p1, Vec2 p2) {
+    final id = nextId();
+    final w = (p2.x - p1.x).abs();
+    final h = (p2.y - p1.y).abs();
+    final minX = math.min(p1.x, p2.x);
+    final minY = math.min(p1.y, p2.y);
+    final node = RectNode(
+      id: id,
+      name: 'Rectangle',
+      x: minX,
+      y: minY,
+      width: w,
+      height: h,
+      style: ShapeStyle(fill: primaryColor),
+    );
+    execute(AddNodeCommand(node, parentId: activeLayerId), merge: false);
+    selectOnly(id);
+    return id;
+  }
+
+  String insertEllipse(Vec2 center, Vec2 radius) {
+    final id = nextId();
+    final rx = (radius.x - center.x).abs();
+    final ry = (radius.y - center.y).abs();
+    final node = EllipseNode(
+      id: id,
+      name: 'Ellipse',
+      cx: center.x,
+      cy: center.y,
+      rx: rx,
+      ry: ry,
+      style: ShapeStyle(fill: primaryColor),
+    );
+    execute(AddNodeCommand(node, parentId: activeLayerId), merge: false);
+    selectOnly(id);
+    return id;
   }
 
   void nudgeSelected(double dx, double dy) {
@@ -240,7 +587,7 @@ class EditorController extends ChangeNotifier {
   // --- Layer Tree Actions ---
   void addLayer({String? name}) {
     final newLayer = GroupNode(
-      id: _idGen.next(),
+      id: nextId(),
       name: name ?? 'Layer ${document.layers.length + 1}',
     );
     execute(AddNodeCommand(newLayer, parentId: Document.rootId), merge: false);
@@ -288,7 +635,7 @@ class EditorController extends ChangeNotifier {
         .whereType<Node>()
         .toList();
 
-    final groupId = _idGen.next();
+    final groupId = nextId();
     final group = GroupNode(
       id: groupId,
       name: 'Group',
@@ -316,34 +663,50 @@ class EditorController extends ChangeNotifier {
     );
   }
 
+  /// Modern callback for [ReorderableListView] (Flutter 3.41+) where target index is already adjusted.
+  void reorderLayerItem(int oldIndex, int newIndex) {
+    if (oldIndex < 0 || oldIndex >= document.layers.length) return;
+    final layer = document.layers[oldIndex];
+    execute(
+      MoveNodeCommand(layer.id, newParentId: Document.rootId, newIndex: newIndex),
+      merge: false,
+    );
+  }
+
   // --- Stroke Handling ---
-  void beginStroke(Vec2 point, {double pressure = 0.5, double tilt = 0.0}) {
+  void beginStroke(Vec2 point, {double pressure = 0.5, double tilt = 0.0, int timeMs = 0}) {
     _activeStroke.clear();
     _activeStroke.add(StrokeSample(
       x: point.x,
       y: point.y,
       pressure: pressure,
       tilt: tilt,
-      timeMs: 0,
+      timeMs: timeMs,
     ));
-    notifyListeners();
+    activeStrokeNotifier.value = List.of(_activeStroke);
   }
 
-  void appendStroke(Vec2 point, {double pressure = 0.5, double tilt = 0.0}) {
+  void appendStroke(Vec2 point, {double pressure = 0.5, double tilt = 0.0, int timeMs = 0}) {
     _activeStroke.add(StrokeSample(
       x: point.x,
       y: point.y,
       pressure: pressure,
       tilt: tilt,
-      timeMs: _activeStroke.length * 16,
+      timeMs: timeMs,
     ));
-    notifyListeners();
+    activeStrokeNotifier.value = List.of(_activeStroke);
+  }
+
+  /// Cancels in-progress stroke without committing to document (e.g. palm contact rejection).
+  void cancelActiveStroke() {
+    _activeStroke.clear();
+    activeStrokeNotifier.value = const [];
   }
 
   void endStroke() {
     if (_activeStroke.length < 2) {
       _activeStroke.clear();
-      notifyListeners();
+      activeStrokeNotifier.value = const [];
       return;
     }
 
@@ -354,7 +717,7 @@ class EditorController extends ChangeNotifier {
 
     if (!path.isEmpty) {
       final node = PathNode(
-        id: _idGen.next(),
+        id: nextId(),
         name: 'Stroke',
         style: ShapeStyle(fill: primaryColor),
         path: path,
@@ -365,8 +728,44 @@ class EditorController extends ChangeNotifier {
     }
 
     _activeStroke.clear();
+    activeStrokeNotifier.value = const [];
     commitMerge();
     notifyListeners();
+  }
+
+  /// Erases any stroke node that intersects or is within [radius] of [docPoint].
+  /// Triggered automatically by S Pen physical eraser end or side button hold.
+  bool eraseStrokesNear(Vec2 docPoint, {double radius = 16.0}) {
+    final toRemove = <String>[];
+    for (final node in document.walk()) {
+      if (node is PathNode && node.visible && !node.locked) {
+        final ancestry = document.ancestry(node.id);
+        final fullMatrix = concatTransforms(ancestry);
+        if (!fullMatrix.isInvertible) continue;
+        final localPoint = fullMatrix.inverted().apply(docPoint);
+
+        final hit = node.toPath().hitTestStroke(localPoint, radius) ||
+            node.toPath().containsPoint(localPoint) ||
+            (node.samples?.any((s) => (Vec2(s.x, s.y) - localPoint).length <= radius) ?? false);
+
+        if (hit) {
+          toRemove.add(node.id);
+        }
+      }
+    }
+
+    if (toRemove.isNotEmpty) {
+      for (final id in toRemove) {
+        _selectedNodeIds.remove(id);
+        execute(
+          RemoveNodeCommand(id),
+          merge: true,
+        );
+      }
+      notifyListeners();
+      return true;
+    }
+    return false;
   }
 
   // --- Shape Drag Handling ---
@@ -394,7 +793,7 @@ class EditorController extends ChangeNotifier {
         Node? node;
         if (_currentTool == EditorTool.rectangle) {
           node = RectNode(
-            id: _idGen.next(),
+            id: nextId(),
             name: 'Rectangle',
             x: left,
             y: top,
@@ -408,7 +807,7 @@ class EditorController extends ChangeNotifier {
           );
         } else if (_currentTool == EditorTool.ellipse) {
           node = EllipseNode(
-            id: _idGen.next(),
+            id: nextId(),
             name: 'Ellipse',
             cx: left + width / 2,
             cy: top + height / 2,
@@ -512,10 +911,12 @@ class EditorController extends ChangeNotifier {
         y: initial.y + delta.y,
       );
     } else if (transformMode == TransformMode.rotate) {
-      // Rotation relative to center
-      final center = Vec2(initial.x + b.center.x, initial.y + b.center.y);
-      final angleStart = math.atan2(transformDragStart!.y - center.y, transformDragStart!.x - center.x);
-      final angleCurrent = math.atan2(currentPoint.y - center.y, currentPoint.x - center.x);
+      final ancestry = document.ancestry(transformDragNodeId!);
+      final parentMatrix = concatTransforms(ancestry.take(ancestry.length - 1));
+      final centerDoc = (parentMatrix * initial.toMatrix()).apply(b.center);
+
+      final angleStart = math.atan2(transformDragStart!.y - centerDoc.y, transformDragStart!.x - centerDoc.x);
+      final angleCurrent = math.atan2(currentPoint.y - centerDoc.y, currentPoint.x - centerDoc.x);
       final deltaDeg = (angleCurrent - angleStart) * 180 / math.pi;
 
       updatedTransform = initial.copyWith(
@@ -524,24 +925,41 @@ class EditorController extends ChangeNotifier {
         rotation: (initial.rotation + deltaDeg) % 360,
       );
     } else if (transformMode == TransformMode.scale && activeHandle != null) {
-      final delta = currentPoint - transformDragStart!;
+      final ancestry = document.ancestry(transformDragNodeId!);
+      final fullMatrix = concatTransforms(ancestry);
+      final inv = fullMatrix.isInvertible ? fullMatrix.inverted() : Matrix2D.identity;
+      final localStart = inv.apply(transformDragStart!);
+      final localCurrent = inv.apply(currentPoint);
+      final delta = localCurrent - localStart;
+
       double sx = initial.scaleX;
       double sy = initial.scaleY;
 
       final w = b.width > 0 ? b.width : 10.0;
       final h = b.height > 0 ? b.height : 10.0;
 
+      double originX = initial.originX;
+      double originY = initial.originY;
+
       switch (activeHandle!) {
         case HandleType.bottomRight:
+          originX = b.left;
+          originY = b.top;
           sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
           sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
         case HandleType.bottomLeft:
+          originX = b.right;
+          originY = b.top;
           sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
           sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
         case HandleType.topRight:
+          originX = b.left;
+          originY = b.bottom;
           sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
           sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
         case HandleType.topLeft:
+          originX = b.right;
+          originY = b.bottom;
           sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
           sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
         default:
@@ -549,9 +967,58 @@ class EditorController extends ChangeNotifier {
       }
 
       updatedTransform = initial.copyWith(
+        originX: originX,
+        originY: originY,
         scaleX: sx,
         scaleY: sy,
       );
+    }
+
+    final nodeId = transformDragNodeId!;
+    final hasAnimations = document.animations.containsKey(nodeId);
+    if (_currentTime > 0 && hasAnimations) {
+      final commands = <Command>[];
+      if (transformMode == TransformMode.translate) {
+        commands.add(SetTrackCommand.setKeyframe(
+          document,
+          nodeId,
+          AnimProperty.x,
+          Keyframe(_currentTime, updatedTransform.x),
+        ));
+        commands.add(SetTrackCommand.setKeyframe(
+          document,
+          nodeId,
+          AnimProperty.y,
+          Keyframe(_currentTime, updatedTransform.y),
+        ));
+      } else if (transformMode == TransformMode.rotate) {
+        commands.add(SetTrackCommand.setKeyframe(
+          document,
+          nodeId,
+          AnimProperty.rotation,
+          Keyframe(_currentTime, updatedTransform.rotation),
+        ));
+      } else if (transformMode == TransformMode.scale) {
+        commands.add(SetTrackCommand.setKeyframe(
+          document,
+          nodeId,
+          AnimProperty.scaleX,
+          Keyframe(_currentTime, updatedTransform.scaleX),
+        ));
+        commands.add(SetTrackCommand.setKeyframe(
+          document,
+          nodeId,
+          AnimProperty.scaleY,
+          Keyframe(_currentTime, updatedTransform.scaleY),
+        ));
+      }
+      if (commands.isNotEmpty) {
+        execute(
+          BatchCommand('Auto-Key Transform', commands),
+          merge: true,
+        );
+        return;
+      }
     }
 
     execute(
@@ -578,6 +1045,7 @@ class EditorController extends ChangeNotifier {
 
   @override
   void dispose() {
+    activeStrokeNotifier.dispose();
     _ticker?.dispose();
     super.dispose();
   }

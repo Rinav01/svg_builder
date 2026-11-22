@@ -10,11 +10,13 @@ class DocumentPainter extends CustomPainter {
     required this.document,
     this.selectedNodeIds = const {},
     this.isNodeEditMode = false,
+    this.peerPresences = const [],
   });
 
   final Document document;
   final Set<String> selectedNodeIds;
   final bool isNodeEditMode;
+  final List<PeerPresence> peerPresences;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -31,6 +33,10 @@ class DocumentPainter extends CustomPainter {
 
     if (selectedNodeIds.isNotEmpty) {
       _paintSelections(canvas);
+    }
+
+    if (peerPresences.isNotEmpty) {
+      _paintPeerPresences(canvas);
     }
   }
 
@@ -201,10 +207,74 @@ class DocumentPainter extends CustomPainter {
     canvas.restore();
   }
 
+  void _paintPeerPresences(Canvas canvas) {
+    for (final peer in peerPresences) {
+      final peerColor = peer.color.toUiColor();
+
+      // 1. Draw remote peer selection outlines
+      for (final id in peer.selectedNodeIds) {
+        final node = document.findById(id);
+        if (node == null) continue;
+        final ancestry = document.ancestry(id);
+        final fullMatrix = concatTransforms(ancestry);
+        final b = node.localBounds;
+        if (b.isEmpty) continue;
+
+        canvas.save();
+        canvas.transform(fullMatrix.toMatrix4());
+        canvas.drawRect(
+          Rect.fromLTRB(b.left, b.top, b.right, b.bottom),
+          Paint()
+            ..color = peerColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.0,
+        );
+        canvas.restore();
+      }
+
+      // 2. Draw remote peer cursor and name tag
+      if (peer.cursorPosition != null) {
+        final pos = Offset(peer.cursorPosition!.x, peer.cursorPosition!.y);
+
+        // Arrow cursor
+        final cursorPath = ui.Path()
+          ..moveTo(pos.dx, pos.dy)
+          ..lineTo(pos.dx + 12, pos.dy + 12)
+          ..lineTo(pos.dx + 4, pos.dy + 13)
+          ..lineTo(pos.dx, pos.dy + 18)
+          ..close();
+
+        canvas.drawPath(cursorPath, Paint()..color = peerColor);
+        canvas.drawPath(
+          cursorPath,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0,
+        );
+
+        // Name tag banner
+        final nameSpan = TextSpan(
+          text: peer.displayName,
+          style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+        );
+        final tp = TextPainter(text: nameSpan, textDirection: TextDirection.ltr)..layout();
+
+        final tagRect = RRect.fromRectAndRadius(
+          Rect.fromLTWH(pos.dx + 12, pos.dy + 14, tp.width + 8, tp.height + 4),
+          const Radius.circular(3),
+        );
+        canvas.drawRRect(tagRect, Paint()..color = peerColor);
+        tp.paint(canvas, Offset(pos.dx + 16, pos.dy + 16));
+      }
+    }
+  }
+
   @override
   bool shouldRepaint(covariant DocumentPainter oldDelegate) {
     return oldDelegate.document != document ||
         oldDelegate.selectedNodeIds != selectedNodeIds ||
-        oldDelegate.isNodeEditMode != isNodeEditMode;
+        oldDelegate.isNodeEditMode != isNodeEditMode ||
+        oldDelegate.peerPresences != peerPresences;
   }
 }

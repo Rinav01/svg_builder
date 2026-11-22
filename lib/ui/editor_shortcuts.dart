@@ -18,6 +18,18 @@ class DeleteSelectedIntent extends Intent {
   const DeleteSelectedIntent();
 }
 
+class CopyIntent extends Intent {
+  const CopyIntent();
+}
+
+class PasteIntent extends Intent {
+  const PasteIntent();
+}
+
+class DuplicateIntent extends Intent {
+  const DuplicateIntent();
+}
+
 class SelectAllIntent extends Intent {
   const SelectAllIntent();
 }
@@ -55,15 +67,26 @@ class EditorShortcuts {
     LogicalKeySet(LogicalKeyboardKey.delete): const DeleteSelectedIntent(),
     LogicalKeySet(LogicalKeyboardKey.backspace): const DeleteSelectedIntent(),
 
+    // Clipboard
+    LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyC): const CopyIntent(),
+    LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyC): const CopyIntent(),
+    LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyV): const PasteIntent(),
+    LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyV): const PasteIntent(),
+    LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyD): const DuplicateIntent(),
+    LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyD): const DuplicateIntent(),
+
     // Group
     LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.keyG): const GroupIntent(),
     LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyG): const GroupIntent(),
 
     // Tool switching accelerators
     LogicalKeySet(LogicalKeyboardKey.keyV): const SwitchToolIntent(0), // Select
-    LogicalKeySet(LogicalKeyboardKey.keyP): const SwitchToolIntent(1), // Pen
-    LogicalKeySet(LogicalKeyboardKey.keyR): const SwitchToolIntent(2), // Rectangle
-    LogicalKeySet(LogicalKeyboardKey.keyO): const SwitchToolIntent(3), // Ellipse
+    LogicalKeySet(LogicalKeyboardKey.keyN): const SwitchToolIntent(1), // Node edit
+    LogicalKeySet(LogicalKeyboardKey.keyP): const SwitchToolIntent(2), // Pen
+    LogicalKeySet(LogicalKeyboardKey.keyE): const SwitchToolIntent(3), // Eraser
+    LogicalKeySet(LogicalKeyboardKey.keyR): const SwitchToolIntent(4), // Rectangle
+    LogicalKeySet(LogicalKeyboardKey.keyO): const SwitchToolIntent(5), // Ellipse
+    LogicalKeySet(LogicalKeyboardKey.keyT): const SwitchToolIntent(6), // Text
 
     // Arrow keys nudge (1px normal, 10px with shift)
     LogicalKeySet(LogicalKeyboardKey.arrowLeft): const NudgeIntent(-1, 0),

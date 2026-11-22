@@ -7,6 +7,8 @@ library;
 export 'animation/easing.dart';
 export 'animation/evaluator.dart';
 export 'animation/track.dart';
+export 'collaboration/crdt_sync_engine.dart';
+export 'collaboration/peer_presence.dart';
 export 'commands/commands.dart';
 export 'commands/history.dart';
 export 'commands/path_edit_command.dart';

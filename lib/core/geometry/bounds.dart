@@ -65,6 +65,8 @@ class Bounds {
   bool contains(Vec2 p) =>
       !isEmpty && p.x >= left && p.x <= right && p.y >= top && p.y <= bottom;
 
+  bool containsPoint(Vec2 p) => contains(p);
+
   bool intersects(Bounds o) =>
       !isEmpty &&
       !o.isEmpty &&

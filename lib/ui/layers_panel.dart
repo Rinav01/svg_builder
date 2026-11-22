@@ -78,16 +78,20 @@ class LayersPanel extends StatelessWidget {
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         ),
+                      if (controller.selectedNodeIds.any((id) => controller.document.findById(id) is GroupNode))
+                        IconButton(
+                          icon: const Icon(Icons.folder_open_outlined, size: 18, color: Colors.amberAccent),
+                          tooltip: 'Ungroup selected group',
+                          onPressed: () => controller.ungroupSelected(),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                        ),
                       const Spacer(),
                       if (controller.selectedNodeIds.isNotEmpty)
                         IconButton(
                           icon: const Icon(Icons.delete_outline, size: 18, color: Colors.redAccent),
                           tooltip: 'Delete selected',
-                          onPressed: () {
-                            for (final id in controller.selectedNodeIds.toList()) {
-                              controller.deleteNode(id);
-                            }
-                          },
+                          onPressed: () => controller.deleteSelected(),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                         ),
@@ -102,7 +106,7 @@ class LayersPanel extends StatelessWidget {
                   child: ReorderableListView.builder(
                     buildDefaultDragHandles: false,
                     itemCount: layers.length,
-                    onReorder: controller.reorderLayer,
+                    onReorderItem: controller.reorderLayerItem,
                     itemBuilder: (context, index) {
                       final layer = layers[index];
                       return _buildLayerItem(context, layer, index);
@@ -119,6 +123,7 @@ class LayersPanel extends StatelessWidget {
 
   Widget _buildLayerItem(BuildContext context, Node layer, int index) {
     final isSelected = controller.selectedNodeIds.contains(layer.id);
+    final isActive = controller.activeLayerId == layer.id;
     final isGroup = layer is GroupNode;
     final children = isGroup ? layer.children : const <Node>[];
 
@@ -128,32 +133,48 @@ class LayersPanel extends StatelessWidget {
       child: ExpansionTile(
         key: PageStorageKey(layer.id),
         initiallyExpanded: true,
-        tilePadding: const EdgeInsets.symmetric(horizontal: 8),
+        tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+        childrenPadding: EdgeInsets.zero,
         leading: ReorderableDragStartListener(
           index: index,
-          child: const Icon(Icons.drag_handle, size: 16, color: Colors.white38),
+          child: const Icon(Icons.drag_handle, size: 14, color: Colors.white38),
         ),
         title: GestureDetector(
-          onTap: () => controller.selectNode(layer.id),
+          onTap: () {
+            controller.selectNode(layer.id);
+            controller.setActiveLayer(layer.id);
+          },
+          onDoubleTap: () => _promptRename(context, layer),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 isGroup ? Icons.folder : Icons.brush,
-                size: 16,
+                size: 14,
                 color: isSelected ? Colors.blueAccent : Colors.white70,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   layer.name.isNotEmpty ? layer.name : layer.typeName,
                   style: TextStyle(
                     color: isSelected ? Colors.blueAccent : Colors.white,
-                    fontSize: 13,
+                    fontSize: 12,
                     fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+              if (isActive)
+                Container(
+                  margin: const EdgeInsets.only(left: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.blueAccent.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                  child: const Text('ACT', style: TextStyle(color: Colors.blueAccent, fontSize: 8, fontWeight: FontWeight.bold)),
+                ),
             ],
           ),
         ),
@@ -163,33 +184,33 @@ class LayersPanel extends StatelessWidget {
             IconButton(
               icon: Icon(
                 layer.visible ? Icons.visibility : Icons.visibility_off,
-                size: 16,
+                size: 15,
                 color: layer.visible ? Colors.white60 : Colors.white24,
               ),
               tooltip: layer.visible ? 'Hide layer' : 'Show layer',
               onPressed: () => controller.toggleVisibility(layer.id),
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
             ),
             IconButton(
               icon: Icon(
                 layer.locked ? Icons.lock : Icons.lock_open,
-                size: 16,
+                size: 15,
                 color: layer.locked ? Colors.amberAccent : Colors.white24,
               ),
               tooltip: layer.locked ? 'Unlock' : 'Lock',
               onPressed: () => controller.toggleLock(layer.id),
               padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              constraints: const BoxConstraints(minWidth: 20, minHeight: 20),
             ),
           ],
         ),
-        children: children.map((c) => _buildChildNodeItem(c, indent: 24)).toList(),
+        children: children.map((c) => _buildChildNodeItem(context, c, indent: 24)).toList(),
       ),
     );
   }
 
-  Widget _buildChildNodeItem(Node node, {double indent = 24}) {
+  Widget _buildChildNodeItem(BuildContext context, Node node, {double indent = 24}) {
     final isSelected = controller.selectedNodeIds.contains(node.id);
     final icon = switch (node) {
       RectNode() => Icons.crop_square,
@@ -211,6 +232,7 @@ class LayersPanel extends StatelessWidget {
             Expanded(
               child: GestureDetector(
                 onTap: () => controller.selectNode(node.id),
+                onDoubleTap: () => _promptRename(context, node),
                 child: Text(
                   node.name.isNotEmpty ? node.name : node.typeName,
                   style: TextStyle(
@@ -243,6 +265,33 @@ class LayersPanel extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _promptRename(BuildContext context, Node node) {
+    final textCtrl = TextEditingController(text: node.name);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        title: Text('Rename ${node.typeName}', style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: textCtrl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(labelText: 'Name'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              controller.updateNode(node.id, (n) => n.withBase(name: textCtrl.text), label: 'Rename');
+              Navigator.pop(context);
+            },
+            child: const Text('Rename'),
+          ),
+        ],
       ),
     );
   }

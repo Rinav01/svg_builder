@@ -47,6 +47,8 @@ class Matrix2D {
         b * m.e + d * m.f + f,
       );
 
+  Matrix2D operator *(Matrix2D m) => multiply(m);
+
   double get determinant => a * d - b * c;
 
   bool get isInvertible => determinant.abs() > 1e-12;

@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../core/core.dart';
@@ -27,15 +28,25 @@ class _CanvasViewState extends State<CanvasView> {
   // Active pointer tracking
   int? _activeDrawingPointer;
   bool _isDrawingWithStylus = false;
+  bool _isErasingWithStylus = false;
   bool _isTransformingNode = false;
   bool _isDraggingPathNode = false;
+  bool _isSingleFingerPanning = false;
+  Offset? _lastPanPosition;
 
-  // Multi-touch gestures tracking for canvas Pan & Zoom
+  // Stylus hover cursor position (S Pen / Wacom proximity)
+  Offset? _hoverPosition;
+
+  // Multi-touch gestures tracking for canvas Pan & Zoom and 2/3-finger tap Undo/Redo
   final Map<int, Offset> _touchPointers = {};
   double _baseScale = 1.0;
   Offset _baseOffset = Offset.zero;
   double? _initialTouchDistance;
   Offset? _initialTouchCenter;
+  DateTime? _multiTouchStartTime;
+  Offset? _firstTouchStart;
+  double _maxTouchTravel = 0.0;
+  int _maxMultiTouchesInGesture = 0;
 
   Vec2 _toDocCoords(Offset globalOffset, BoxConstraints constraints) {
     final renderBox = context.findRenderObject() as RenderBox?;
@@ -51,10 +62,26 @@ class _CanvasViewState extends State<CanvasView> {
   void _onPointerDown(PointerDownEvent event) {
     final isStylus = event.kind == PointerDeviceKind.stylus ||
         event.kind == PointerDeviceKind.invertedStylus;
+    final isEraser = event.kind == PointerDeviceKind.invertedStylus ||
+        (event.buttons & kPrimaryStylusButton != 0) ||
+        (event.buttons & kSecondaryStylusButton != 0);
 
-    // Track touch pointers for two-finger pan/zoom
+    // Check secondary button for context menu
+    if (event.buttons & kSecondaryMouseButton != 0) {
+      _showContextMenu(context, event.position);
+      return;
+    }
+
+    // Track touch pointers for two-finger pan/zoom and tap gestures
     if (event.kind == PointerDeviceKind.touch) {
       _touchPointers[event.pointer] = event.position;
+      _maxMultiTouchesInGesture = math.max(_maxMultiTouchesInGesture, _touchPointers.length);
+      if (_touchPointers.length == 1) {
+        _multiTouchStartTime = DateTime.now();
+        _firstTouchStart = event.position;
+        _maxTouchTravel = 0.0;
+      }
+
       if (_touchPointers.length >= 2) {
         // Cancel single pointer drawing if another touch comes down
         if (_activeDrawingPointer != null && !_isDrawingWithStylus) {
@@ -70,11 +97,29 @@ class _CanvasViewState extends State<CanvasView> {
     // Palm rejection: reject finger touch while drawing with stylus
     if (_isDrawingWithStylus && !isStylus) return;
 
+    final docPoint = _toDocCoords(event.position, const BoxConstraints());
+
+    // S Pen physical eraser end or side button hold acts as stroke eraser
+    if (isEraser) {
+      _activeDrawingPointer = event.pointer;
+      _isErasingWithStylus = true;
+      widget.controller.eraseStrokesNear(docPoint, radius: widget.controller.brushSize * 1.5);
+      return;
+    }
+
+    // Pen-only mode: when inking tool is active, finger touch navigates rather than draws
+    if (widget.controller.penOnlyMode && event.kind == PointerDeviceKind.touch) {
+      if (widget.controller.currentTool == EditorTool.pen) {
+        _isSingleFingerPanning = true;
+        _lastPanPosition = event.position;
+        return;
+      }
+    }
+
     if (_activeDrawingPointer == null) {
       _activeDrawingPointer = event.pointer;
       _isDrawingWithStylus = isStylus;
 
-      final docPoint = _toDocCoords(event.position, const BoxConstraints());
       final pressure = event.pressureMin == event.pressureMax
           ? 0.5
           : ((event.pressure - event.pressureMin) /
@@ -87,7 +132,12 @@ class _CanvasViewState extends State<CanvasView> {
             docPoint,
             pressure: pressure,
             tilt: event.tilt,
+            timeMs: event.timeStamp.inMilliseconds,
           );
+        case EditorTool.eraser:
+          widget.controller.eraseStrokesNear(docPoint, radius: widget.controller.brushSize * 1.5);
+        case EditorTool.text:
+          _promptInsertText(context, docPoint);
         case EditorTool.rectangle:
         case EditorTool.ellipse:
           widget.controller.beginShape(docPoint);
@@ -100,8 +150,22 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   void _onPointerMove(PointerMoveEvent event) {
+    // Single finger pan when in pen-only mode
+    if (_isSingleFingerPanning && _lastPanPosition != null) {
+      final delta = event.position - _lastPanPosition!;
+      _lastPanPosition = event.position;
+      setState(() {
+        _viewportOffset += delta;
+      });
+      return;
+    }
+
     // Multi-touch Pan & Zoom handling
     if (_touchPointers.containsKey(event.pointer)) {
+      if (_firstTouchStart != null) {
+        final travel = (event.position - _firstTouchStart!).distance;
+        if (travel > _maxTouchTravel) _maxTouchTravel = travel;
+      }
       _touchPointers[event.pointer] = event.position;
       if (_touchPointers.length >= 2) {
         _updateMultiTouch();
@@ -112,6 +176,12 @@ class _CanvasViewState extends State<CanvasView> {
     if (event.pointer != _activeDrawingPointer) return;
 
     final docPoint = _toDocCoords(event.position, const BoxConstraints());
+
+    if (_isErasingWithStylus) {
+      widget.controller.eraseStrokesNear(docPoint, radius: widget.controller.brushSize * 1.5);
+      return;
+    }
+
     final pressure = event.pressureMin == event.pressureMax
         ? 0.5
         : ((event.pressure - event.pressureMin) /
@@ -124,7 +194,12 @@ class _CanvasViewState extends State<CanvasView> {
           docPoint,
           pressure: pressure,
           tilt: event.tilt,
+          timeMs: event.timeStamp.inMilliseconds,
         );
+      case EditorTool.eraser:
+        widget.controller.eraseStrokesNear(docPoint, radius: widget.controller.brushSize * 1.5);
+      case EditorTool.text:
+        break;
       case EditorTool.rectangle:
       case EditorTool.ellipse:
         widget.controller.updateShape(docPoint);
@@ -140,7 +215,43 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   void _onPointerUp(PointerUpEvent event) {
-    _touchPointers.remove(event.pointer);
+    if (event.kind == PointerDeviceKind.touch) {
+      _touchPointers.remove(event.pointer);
+      if (_touchPointers.isEmpty) {
+        // Multi-touch gesture tap recognition (2-finger tap = Undo, 3-finger tap = Redo)
+        final durationMs = _multiTouchStartTime != null
+            ? DateTime.now().difference(_multiTouchStartTime!).inMilliseconds
+            : 1000;
+        if (durationMs < 350 && _maxTouchTravel < 25.0) {
+          if (_maxMultiTouchesInGesture == 2) {
+            widget.controller.undo();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Two-finger tap: Undo'),
+                duration: Duration(milliseconds: 700),
+              ),
+            );
+          } else if (_maxMultiTouchesInGesture == 3) {
+            widget.controller.redo();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Three-finger tap: Redo'),
+                duration: Duration(milliseconds: 700),
+              ),
+            );
+          }
+        }
+        _maxMultiTouchesInGesture = 0;
+        _multiTouchStartTime = null;
+        _firstTouchStart = null;
+      }
+    }
+
+    if (_isSingleFingerPanning) {
+      _isSingleFingerPanning = false;
+      _lastPanPosition = null;
+    }
+
     if (_touchPointers.length < 2) {
       _initialTouchDistance = null;
       _initialTouchCenter = null;
@@ -151,10 +262,22 @@ class _CanvasViewState extends State<CanvasView> {
     }
   }
 
+  void _onPointerHover(PointerHoverEvent event) {
+    if (event.kind == PointerDeviceKind.stylus || event.kind == PointerDeviceKind.invertedStylus) {
+      setState(() {
+        _hoverPosition = event.position;
+      });
+    } else if (_hoverPosition != null) {
+      setState(() {
+        _hoverPosition = null;
+      });
+    }
+  }
+
   void _onPointerCancel(PointerCancelEvent event) {
     _touchPointers.remove(event.pointer);
     if (event.pointer == _activeDrawingPointer) {
-      _finishPointer();
+      _cancelCurrentDrawing();
     }
   }
 
@@ -177,27 +300,37 @@ class _CanvasViewState extends State<CanvasView> {
 
     setState(() {
       final scaleFactor = (currentDistance / _initialTouchDistance!).clamp(0.2, 5.0);
-      _viewportScale = (_baseScale * scaleFactor).clamp(0.1, 10.0);
+      final newScale = (_baseScale * scaleFactor).clamp(0.1, 10.0);
 
-      final translationDelta = currentCenter - _initialTouchCenter!;
-      _viewportOffset = _baseOffset + translationDelta;
+      // Keep currentCenter anchored to exact document coordinate under fingers
+      final docFocalPoint = (_initialTouchCenter! - _baseOffset) / _baseScale;
+      _viewportScale = newScale;
+      _viewportOffset = currentCenter - (docFocalPoint * newScale);
     });
   }
 
   void _cancelCurrentDrawing() {
     _activeDrawingPointer = null;
     _isDrawingWithStylus = false;
+    _isErasingWithStylus = false;
     _isTransformingNode = false;
+    _isDraggingPathNode = false;
+    widget.controller.cancelActiveStroke();
     widget.controller.endTransformDrag();
+    widget.controller.endPathNodeDrag();
   }
 
   void _finishPointer() {
     _activeDrawingPointer = null;
     _isDrawingWithStylus = false;
+    _isErasingWithStylus = false;
 
     switch (widget.controller.currentTool) {
       case EditorTool.pen:
         widget.controller.endStroke();
+      case EditorTool.eraser:
+      case EditorTool.text:
+        break;
       case EditorTool.rectangle:
       case EditorTool.ellipse:
         widget.controller.endShape();
@@ -277,25 +410,28 @@ class _CanvasViewState extends State<CanvasView> {
     // 2. Check if we clicked inside an already-selected shape (for translation drag)
     for (final id in widget.controller.selectedNodeIds) {
       final node = widget.controller.document.findById(id);
-      if (node is ShapeNode &&
-          (node.toPath().containsPoint(docPoint) ||
-              node.toPath().hitTestStroke(docPoint, 8.0 / _viewportScale))) {
-        _isTransformingNode = true;
-        widget.controller.beginTransformDrag(id, docPoint);
-        return;
+      if (node != null) {
+        final ancestry = widget.controller.document.ancestry(id);
+        final fullMatrix = concatTransforms(ancestry);
+        if (!fullMatrix.isInvertible) continue;
+        final localPoint = fullMatrix.inverted().apply(docPoint);
+        final hit = node is ShapeNode
+            ? (node.toPath().containsPoint(localPoint) || node.toPath().hitTestStroke(localPoint, 8.0 / _viewportScale))
+            : node.localBounds.containsPoint(localPoint);
+
+        if (hit) {
+          _isTransformingNode = true;
+          widget.controller.beginTransformDrag(id, docPoint);
+          return;
+        }
       }
     }
 
     // 3. Otherwise hit-test top-most shape in document
-    Node? hit;
-    for (final node in widget.controller.document.walk()) {
-      if (node is ShapeNode && node.visible && !node.locked) {
-        if (node.toPath().containsPoint(docPoint) ||
-            node.toPath().hitTestStroke(docPoint, 6.0 / _viewportScale)) {
-          hit = node;
-        }
-      }
-    }
+    final hit = widget.controller.document.hitTest(
+      docPoint,
+      strokeTolerance: 6.0 / _viewportScale,
+    );
 
     if (hit != null) {
       widget.controller.selectNode(hit.id);
@@ -305,6 +441,82 @@ class _CanvasViewState extends State<CanvasView> {
       widget.controller.clearSelection();
       _isTransformingNode = false;
     }
+  }
+
+  void _showContextMenu(BuildContext context, Offset globalPos) {
+    if (widget.controller.selectedNodeIds.isEmpty) return;
+    final isGroup = widget.controller.selectedNodeIds.any((id) => widget.controller.document.findById(id) is GroupNode);
+    showMenu(
+      context: context,
+      position: RelativeRect.fromLTRB(globalPos.dx, globalPos.dy, globalPos.dx + 1, globalPos.dy + 1),
+      items: [
+        const PopupMenuItem(value: 'duplicate', child: Row(children: [Icon(Icons.copy, size: 16), SizedBox(width: 8), Text('Duplicate')])),
+        const PopupMenuItem(value: 'copy', child: Row(children: [Icon(Icons.content_copy, size: 16), SizedBox(width: 8), Text('Copy')])),
+        if (widget.controller.canPaste)
+          const PopupMenuItem(value: 'paste', child: Row(children: [Icon(Icons.content_paste, size: 16), SizedBox(width: 8), Text('Paste')])),
+        if (widget.controller.selectedNodeIds.length >= 2)
+          const PopupMenuItem(value: 'group', child: Row(children: [Icon(Icons.folder, size: 16), SizedBox(width: 8), Text('Group')])),
+        if (isGroup)
+          const PopupMenuItem(value: 'ungroup', child: Row(children: [Icon(Icons.folder_open, size: 16), SizedBox(width: 8), Text('Ungroup')])),
+        const PopupMenuItem(value: 'front', child: Row(children: [Icon(Icons.flip_to_front, size: 16), SizedBox(width: 8), Text('Bring to Front')])),
+        const PopupMenuItem(value: 'back', child: Row(children: [Icon(Icons.flip_to_back, size: 16), SizedBox(width: 8), Text('Send to Back')])),
+        const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 16, color: Colors.redAccent), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.redAccent))])),
+      ],
+    ).then((choice) {
+      if (choice == null) return;
+      switch (choice) {
+        case 'duplicate':
+          widget.controller.duplicateSelected();
+        case 'copy':
+          widget.controller.copySelected();
+        case 'paste':
+          widget.controller.paste();
+        case 'group':
+          widget.controller.groupSelected();
+        case 'ungroup':
+          widget.controller.ungroupSelected();
+        case 'front':
+          for (final id in widget.controller.selectedNodeIds.toList()) {
+            widget.controller.bringToFront(id);
+          }
+        case 'back':
+          for (final id in widget.controller.selectedNodeIds.toList()) {
+            widget.controller.sendToBack(id);
+          }
+        case 'delete':
+          widget.controller.deleteSelected();
+      }
+    });
+  }
+
+  void _promptInsertText(BuildContext context, Vec2 docPoint) {
+    final textCtrl = TextEditingController(text: 'Text');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        title: const Text('Add Text', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: textCtrl,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: const InputDecoration(labelText: 'Enter text'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final str = textCtrl.text.trim();
+              if (str.isNotEmpty) {
+                widget.controller.addTextNode(docPoint, text: str);
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('Insert'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -317,25 +529,40 @@ class _CanvasViewState extends State<CanvasView> {
           onPointerMove: _onPointerMove,
           onPointerUp: _onPointerUp,
           onPointerCancel: _onPointerCancel,
+          onPointerHover: _onPointerHover,
           behavior: HitTestBehavior.opaque,
           child: Stack(
             fit: StackFit.expand,
             children: [
               Transform(
                 transform: Matrix4.identity()
-                  ..translate(_viewportOffset.dx, _viewportOffset.dy)
-                  ..scale(_viewportScale),
-                child: CustomPaint(
-                  painter: DocumentPainter(
-                    document: widget.controller.renderedDocument,
-                    selectedNodeIds: widget.controller.selectedNodeIds,
-                    isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
-                  ),
-                  foregroundPainter: ActiveStrokePainter(
-                    samples: widget.controller.activeStroke,
-                    strokeColor: Color(widget.controller.primaryColor.value),
-                    size: widget.controller.brushSize,
-                  ),
+                  ..translateByDouble(_viewportOffset.dx, _viewportOffset.dy, 0.0, 1.0)
+                  ..scaleByDouble(_viewportScale, _viewportScale, 1.0, 1.0),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CustomPaint(
+                      painter: DocumentPainter(
+                        document: widget.controller.renderedDocument,
+                        selectedNodeIds: widget.controller.selectedNodeIds,
+                        isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
+                        peerPresences: widget.controller.peerPresences,
+                      ),
+                    ),
+                    ValueListenableBuilder<List<StrokeSample>>(
+                      valueListenable: widget.controller.activeStrokeNotifier,
+                      builder: (context, strokeSamples, _) {
+                        if (strokeSamples.isEmpty) return const SizedBox.shrink();
+                        return CustomPaint(
+                          painter: ActiveStrokePainter(
+                            samples: strokeSamples,
+                            strokeColor: Color(widget.controller.primaryColor.value),
+                            size: widget.controller.brushSize,
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ),
 
@@ -351,11 +578,58 @@ class _CanvasViewState extends State<CanvasView> {
                     viewportScale: _viewportScale,
                   ),
                 ),
+
+              if (_hoverPosition != null)
+                CustomPaint(
+                  painter: _StylusHoverCursorPainter(
+                    position: _hoverPosition!,
+                    radius: (widget.controller.brushSize * _viewportScale) / 2.0,
+                    color: Color(widget.controller.primaryColor.value),
+                  ),
+                ),
             ],
           ),
         );
       },
     );
+  }
+}
+
+class _StylusHoverCursorPainter extends CustomPainter {
+  _StylusHoverCursorPainter({
+    required this.position,
+    required this.radius,
+    required this.color,
+  });
+
+  final Offset position;
+  final double radius;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fillPaint = Paint()
+      ..color = color.withValues(alpha: 0.15)
+      ..style = PaintingStyle.fill;
+    final ringPaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.8)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+    final darkRing = Paint()
+      ..color = Colors.black.withValues(alpha: 0.4)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8;
+
+    canvas.drawCircle(position, radius, fillPaint);
+    canvas.drawCircle(position, radius, ringPaint);
+    canvas.drawCircle(position, radius + 1.0, darkRing);
+  }
+
+  @override
+  bool shouldRepaint(covariant _StylusHoverCursorPainter oldDelegate) {
+    return oldDelegate.position != position ||
+        oldDelegate.radius != radius ||
+        oldDelegate.color != color;
   }
 }
 
@@ -386,21 +660,22 @@ class _ShapePreviewPainter extends CustomPainter {
     final top = start.y < current.y ? start.y : current.y;
     final width = (current.x - start.x).abs();
     final height = (current.y - start.y).abs();
-    final rect = Rect.fromLTWH(left, top, width, height);
 
-    final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.5)
+    final paint = Paint()
+      ..color = color.withValues(alpha: 0.25)
       ..style = PaintingStyle.fill;
     final strokePaint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+      ..color = color
+      ..strokeWidth = 2.0 / viewportScale
+      ..style = PaintingStyle.stroke;
 
     if (tool == EditorTool.rectangle) {
-      canvas.drawRect(rect, fillPaint);
+      final rect = Rect.fromLTWH(left, top, width, height);
+      canvas.drawRect(rect, paint);
       canvas.drawRect(rect, strokePaint);
     } else if (tool == EditorTool.ellipse) {
-      canvas.drawOval(rect, fillPaint);
+      final rect = Rect.fromLTWH(left, top, width, height);
+      canvas.drawOval(rect, paint);
       canvas.drawOval(rect, strokePaint);
     }
 
@@ -412,6 +687,8 @@ class _ShapePreviewPainter extends CustomPainter {
     return oldDelegate.start != start ||
         oldDelegate.current != current ||
         oldDelegate.tool != tool ||
-        oldDelegate.color != color;
+        oldDelegate.color != color ||
+        oldDelegate.viewportOffset != viewportOffset ||
+        oldDelegate.viewportScale != viewportScale;
   }
 }
