@@ -11,24 +11,60 @@ class DocumentPainter extends CustomPainter {
     this.selectedNodeIds = const {},
     this.isNodeEditMode = false,
     this.peerPresences = const [],
+    this.clipToArtboard = false,
+    this.showArtboardFrame = true,
   });
 
   final Document document;
   final Set<String> selectedNodeIds;
   final bool isNodeEditMode;
   final List<PeerPresence> peerPresences;
+  final bool clipToArtboard;
+  final bool showArtboardFrame;
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (document.background != null) {
+    final artboardRect = Rect.fromLTWH(0, 0, document.width, document.height);
+
+    if (showArtboardFrame) {
+      // Artboard shadow
+      canvas.drawShadow(
+        Path()..addRect(artboardRect),
+        Colors.black.withValues(alpha: 0.5),
+        8.0,
+        true,
+      );
+
+      // Artboard background fill
+      final bgColor = document.background?.toUiColor() ?? Colors.white;
+      canvas.drawRect(artboardRect, Paint()..color = bgColor);
+
+      // Artboard boundary outline
       canvas.drawRect(
-        Rect.fromLTWH(0, 0, document.width, document.height),
+        artboardRect,
+        Paint()
+          ..color = Colors.white24
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0,
+      );
+    } else if (document.background != null) {
+      canvas.drawRect(
+        artboardRect,
         Paint()..color = document.background!.toUiColor(),
       );
     }
 
+    if (clipToArtboard) {
+      canvas.save();
+      canvas.clipRect(artboardRect);
+    }
+
     for (final layer in document.layers) {
       _paintNode(canvas, layer);
+    }
+
+    if (clipToArtboard) {
+      canvas.restore();
     }
 
     if (selectedNodeIds.isNotEmpty) {
@@ -275,6 +311,8 @@ class DocumentPainter extends CustomPainter {
     return oldDelegate.document != document ||
         oldDelegate.selectedNodeIds != selectedNodeIds ||
         oldDelegate.isNodeEditMode != isNodeEditMode ||
-        oldDelegate.peerPresences != peerPresences;
+        oldDelegate.peerPresences != peerPresences ||
+        oldDelegate.clipToArtboard != clipToArtboard ||
+        oldDelegate.showArtboardFrame != showArtboardFrame;
   }
 }

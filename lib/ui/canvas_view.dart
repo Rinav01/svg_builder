@@ -25,6 +25,36 @@ class _CanvasViewState extends State<CanvasView> {
   Offset _viewportOffset = Offset.zero;
   double _viewportScale = 1.0;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _fitToScreen();
+    });
+  }
+
+  void _fitToScreen() {
+    final renderBox = context.findRenderObject() as RenderBox?;
+    if (renderBox == null) return;
+    final viewW = renderBox.size.width;
+    final viewH = renderBox.size.height;
+    final docW = widget.controller.document.width;
+    final docH = widget.controller.document.height;
+    if (docW <= 0 || docH <= 0 || viewW <= 0 || viewH <= 0) return;
+
+    final scaleX = (viewW - 60) / docW;
+    final scaleY = (viewH - 60) / docH;
+    final fitScale = math.min(scaleX, scaleY).clamp(0.05, 10.0);
+
+    final offsetX = (viewW - docW * fitScale) / 2.0;
+    final offsetY = (viewH - docH * fitScale) / 2.0;
+
+    setState(() {
+      _viewportScale = fitScale;
+      _viewportOffset = Offset(offsetX, offsetY);
+    });
+  }
+
   // Active pointer tracking
   int? _activeDrawingPointer;
   bool _isDrawingWithStylus = false;
@@ -547,6 +577,8 @@ class _CanvasViewState extends State<CanvasView> {
                         selectedNodeIds: widget.controller.selectedNodeIds,
                         isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
                         peerPresences: widget.controller.peerPresences,
+                        clipToArtboard: widget.controller.clipToArtboard,
+                        showArtboardFrame: true,
                       ),
                     ),
                     ValueListenableBuilder<List<StrokeSample>>(
@@ -587,6 +619,83 @@ class _CanvasViewState extends State<CanvasView> {
                     color: Color(widget.controller.primaryColor.value),
                   ),
                 ),
+
+              // Floating Zoom & Artboard Framing Pill (Bottom Left)
+              Positioned(
+                left: 12,
+                bottom: 12,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xDD1E1E1E),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
+                    boxShadow: const [
+                      BoxShadow(color: Colors.black38, blurRadius: 4, offset: Offset(0, 2)),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.remove, size: 14, color: Colors.white70),
+                        tooltip: 'Zoom Out',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                        onPressed: () {
+                          setState(() {
+                            _viewportScale = (_viewportScale * 0.8).clamp(0.1, 10.0);
+                          });
+                        },
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text(
+                          '${(_viewportScale * 100).round()}%',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.add, size: 14, color: Colors.white70),
+                        tooltip: 'Zoom In',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                        onPressed: () {
+                          setState(() {
+                            _viewportScale = (_viewportScale * 1.25).clamp(0.1, 10.0);
+                          });
+                        },
+                      ),
+                      const SizedBox(width: 2),
+                      IconButton(
+                        icon: const Icon(Icons.fit_screen, size: 14, color: Colors.blueAccent),
+                        tooltip: 'Fit to Screen',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                        onPressed: _fitToScreen,
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          widget.controller.clipToArtboard ? Icons.crop : Icons.crop_free,
+                          size: 14,
+                          color: widget.controller.clipToArtboard ? Colors.amberAccent : Colors.white60,
+                        ),
+                        tooltip: widget.controller.clipToArtboard
+                            ? 'Clipping to Artboard: ON'
+                            : 'Clipping to Artboard: OFF',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                        onPressed: widget.controller.toggleClipToArtboard,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         );

@@ -32,6 +32,22 @@ class AutoSaveService {
     });
   }
 
+  /// Immediately persists the document without debounce delay (e.g. on app pause or navigation).
+  Future<void> saveImmediately(Document document) async {
+    _debounceTimer?.cancel();
+    try {
+      final json = ProjectFormat.encode(document);
+      await database.saveDraft(
+        projectId: currentProjectId,
+        name: currentProjectName,
+        jsonContent: json,
+      );
+      debugPrint('[AutoSave] Immediately saved draft for project "$currentProjectName"');
+    } catch (e) {
+      debugPrint('[AutoSave] Error saving draft immediately: $e');
+    }
+  }
+
   /// Cancels any scheduled timer.
   void dispose() {
     _debounceTimer?.cancel();

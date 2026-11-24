@@ -21,6 +21,7 @@ class Projects extends Table {
 @DriftDatabase(tables: [Projects])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
+  AppDatabase.forTesting(super.executor);
 
   @override
   int get schemaVersion => 1;
@@ -59,6 +60,33 @@ class AppDatabase extends _$AppDatabase {
   /// Deletes a project by id.
   Future<int> deleteProject(String id) {
     return (delete(projects)..where((t) => t.id.equals(id))).go();
+  }
+
+  /// Retrieves a project by id.
+  Future<Project?> getProjectById(String id) {
+    return (select(projects)..where((t) => t.id.equals(id))).getSingleOrNull();
+  }
+
+  /// Renames an existing project.
+  Future<int> renameProject(String id, String newName) {
+    return (update(projects)..where((t) => t.id.equals(id))).write(
+      ProjectsCompanion(
+        name: Value(newName),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
+  }
+
+  /// Duplicates a project under a new ID and name.
+  Future<void> duplicateProject(String sourceId, String newId, String newName) async {
+    final source = await getProjectById(sourceId);
+    if (source != null) {
+      await saveDraft(
+        projectId: newId,
+        name: newName,
+        jsonContent: source.jsonContent,
+      );
+    }
   }
 }
 

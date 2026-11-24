@@ -142,6 +142,8 @@ void _node(XmlBuilder b, Node node, SvgExportOptions o, String Function(double) 
         b.attribute('y', n(node.y));
         b.attribute('font-size', n(node.fontSize));
         b.attribute('font-family', node.fontFamily);
+        b.attribute('dominant-baseline', 'alphabetic');
+        b.attribute('text-anchor', 'start');
         _color(b, 'fill', node.fill);
         b.text(node.text);
       });

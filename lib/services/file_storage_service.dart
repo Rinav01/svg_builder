@@ -1,12 +1,15 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import '../core/core.dart';
 import '../render/document_painter.dart';
 
-/// Service handling file open, save, SVG export, Lottie export, and PNG rendering.
+/// Service handling file open, save, SVG export, Lottie export, PNG rendering, and sharing.
 class FileStorageService {
   static String? _uriToSafePath(Uri? uri) {
     if (uri == null) return null;
@@ -98,7 +101,12 @@ class FileStorageService {
   }
 
   /// Renders a [Document] to high-resolution PNG image bytes.
-  static Future<Uint8List> renderToPng(Document document, {double scale = 2.0}) async {
+  /// Supports [scale] (e.g. 1.0, 2.0, 4.0) and [transparent] background.
+  static Future<Uint8List> renderToPng(
+    Document document, {
+    double scale = 2.0,
+    bool transparent = false,
+  }) async {
     final width = (document.width * scale).ceil();
     final height = (document.height * scale).ceil();
 
@@ -107,8 +115,13 @@ class FileStorageService {
 
     canvas.scale(scale);
 
+    // If transparent is requested, pass a copy of the document without a background color
+    final docToPaint = transparent && document.background != null
+        ? document.copyWith(clearBackground: true)
+        : document;
+
     final painter = DocumentPainter(
-      document: document,
+      document: docToPaint,
       selectedNodeIds: const {},
     );
     painter.paint(canvas, Size(document.width, document.height));
@@ -121,9 +134,14 @@ class FileStorageService {
   }
 
   /// Exports a rendered PNG file to disk.
-  static Future<String?> exportPngFile(Document document, {String defaultName = 'export.png', double scale = 2.0}) async {
+  static Future<String?> exportPngFile(
+    Document document, {
+    String defaultName = 'export.png',
+    double scale = 2.0,
+    bool transparent = false,
+  }) async {
     try {
-      final bytes = await renderToPng(document, scale: scale);
+      final bytes = await renderToPng(document, scale: scale, transparent: transparent);
 
       final uri = await FilePicker.saveFile(
         dialogTitle: 'Export PNG Image',
@@ -134,6 +152,32 @@ class FileStorageService {
       return _uriToSafePath(uri);
     } catch (e) {
       debugPrint('Error exporting PNG file: $e');
+      rethrow;
+    }
+  }
+
+  /// Shares a document file (SVG, PNG, Lottie, or SVGB) via native Android Share Sheet.
+  static Future<void> shareDocumentFile({
+    required String fileName,
+    required Uint8List bytes,
+    required String mimeType,
+    String? subject,
+    Rect? sharePositionOrigin,
+  }) async {
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final tempFile = File('${tempDir.path}/$fileName');
+      await tempFile.writeAsBytes(bytes);
+
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(tempFile.path, mimeType: mimeType, name: fileName)],
+          subject: subject ?? fileName,
+          sharePositionOrigin: sharePositionOrigin,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error sharing document file: $e');
       rethrow;
     }
   }

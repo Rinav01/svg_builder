@@ -21,6 +21,29 @@ enum TransformMode {
   rotate,
 }
 
+/// Identifies an individual keyframe marker on a specific node track.
+class SelectedKeyframe {
+  const SelectedKeyframe({
+    required this.nodeId,
+    required this.property,
+    required this.time,
+  });
+
+  final String nodeId;
+  final AnimProperty property;
+  final double time;
+
+  @override
+  bool operator ==(Object other) =>
+      other is SelectedKeyframe &&
+      other.nodeId == nodeId &&
+      other.property == property &&
+      (other.time - time).abs() < 1e-4;
+
+  @override
+  int get hashCode => Object.hash(nodeId, property, (time * 1000).round());
+}
+
 /// Central controller bridging document state, timeline animation & history with Flutter UI.
 class EditorController extends ChangeNotifier {
   EditorController([Document? initial])
@@ -45,6 +68,20 @@ class EditorController extends ChangeNotifier {
 
   /// Callback fired only when a command mutates the document (e.g. for debounced auto-save).
   void Function(Document doc)? onDocumentChanged;
+
+  String documentName = 'Untitled Project';
+  void setDocumentName(String name) {
+    if (documentName != name) {
+      documentName = name;
+      notifyListeners();
+    }
+  }
+
+  bool clipToArtboard = false;
+  void toggleClipToArtboard() {
+    clipToArtboard = !clipToArtboard;
+    notifyListeners();
+  }
 
   /// Generates a unique node ID guaranteed not to collide with any ID in the document.
   String nextId() {
@@ -141,6 +178,26 @@ class EditorController extends ChangeNotifier {
   bool _isPlaying = false;
   bool get isPlaying => _isPlaying;
 
+  bool loopPlayback = true;
+  bool snapToFrames = true;
+  bool isTimelineCollapsed = false;
+
+  void toggleTimelineCollapsed() {
+    isTimelineCollapsed = !isTimelineCollapsed;
+    notifyListeners();
+  }
+
+  int get currentFrame => (currentTime * document.fps).round();
+  int get totalFrames => (document.duration * document.fps).round();
+
+  double snapTime(double time) {
+    if (!snapToFrames || document.fps <= 0) {
+      return time.clamp(0.0, document.duration);
+    }
+    final frame = (time * document.fps).round();
+    return (frame / document.fps).clamp(0.0, document.duration);
+  }
+
   Ticker? _ticker;
   Duration _lastTick = Duration.zero;
 
@@ -164,7 +221,12 @@ class EditorController extends ChangeNotifier {
 
     var nextTime = _currentTime + dt;
     if (nextTime >= duration) {
-      nextTime = nextTime % duration; // Loop playback
+      if (loopPlayback) {
+        nextTime = nextTime % duration; // Loop playback
+      } else {
+        nextTime = duration;
+        pause();
+      }
     }
     _currentTime = nextTime;
     notifyListeners();
@@ -194,7 +256,7 @@ class EditorController extends ChangeNotifier {
   }
 
   void seek(double time) {
-    _currentTime = time.clamp(0.0, document.duration);
+    _currentTime = snapTime(time);
     notifyListeners();
   }
 
@@ -206,7 +268,30 @@ class EditorController extends ChangeNotifier {
     return evaluateAt(document, _currentTime);
   }
 
-  // Keyframe editing helpers
+  // --- Keyframe Selection & Operations ---
+  SelectedKeyframe? _selectedKeyframe;
+  SelectedKeyframe? get selectedKeyframe => _selectedKeyframe;
+
+  void selectKeyframe(String nodeId, AnimProperty property, double time) {
+    _selectedKeyframe = SelectedKeyframe(nodeId: nodeId, property: property, time: time);
+    notifyListeners();
+  }
+
+  void clearKeyframeSelection() {
+    if (_selectedKeyframe != null) {
+      _selectedKeyframe = null;
+      notifyListeners();
+    }
+  }
+
+  Keyframe? getKeyframe(String nodeId, AnimProperty property, double time) {
+    final anim = document.animations[nodeId];
+    final track = anim?.tracks[property];
+    if (track == null) return null;
+    final idx = track.indexAt(time);
+    return idx >= 0 ? track.keyframes[idx] : null;
+  }
+
   void addKeyframeForSelected(AnimProperty property, double value, {Easing easing = Easing.easeInOut}) {
     if (_selectedNodeIds.isEmpty) return;
     for (final id in _selectedNodeIds) {
@@ -217,6 +302,181 @@ class EditorController extends ChangeNotifier {
         Keyframe(_currentTime, value, easing: easing),
       );
       execute(cmd, merge: false);
+      selectKeyframe(id, property, _currentTime);
+    }
+  }
+
+  void setKeyframe(String nodeId, AnimProperty property, double time, double value, {Easing easing = Easing.easeInOut}) {
+    if (!document.contains(nodeId)) return;
+    final cmd = SetTrackCommand.setKeyframe(
+      document,
+      nodeId,
+      property,
+      Keyframe(time, value, easing: easing),
+    );
+    execute(cmd, merge: false);
+    selectKeyframe(nodeId, property, time);
+  }
+
+  void deleteKeyframe(String nodeId, AnimProperty property, double time) {
+    if (!document.contains(nodeId)) return;
+    final cmd = SetTrackCommand.removeKeyframe(document, nodeId, property, time);
+    execute(cmd, merge: false);
+    if (_selectedKeyframe != null &&
+        _selectedKeyframe!.nodeId == nodeId &&
+        _selectedKeyframe!.property == property &&
+        (_selectedKeyframe!.time - time).abs() < 1e-4) {
+      _selectedKeyframe = null;
+    }
+    notifyListeners();
+  }
+
+  void moveKeyframe(String nodeId, AnimProperty property, double oldTime, double newTime, {bool merge = false}) {
+    if (!document.contains(nodeId)) return;
+    final targetTime = snapTime(newTime);
+    if ((oldTime - targetTime).abs() < 1e-4 && !merge) return;
+
+    final anim = document.animations[nodeId];
+    final track = anim?.tracks[property];
+    if (track == null) return;
+
+    final idx = track.indexAt(oldTime);
+    if (idx < 0) return;
+
+    final existingKf = track.keyframes[idx];
+    final movedKf = existingKf.copyWith(time: targetTime);
+
+    final before = track;
+    final after = track.removeAt(oldTime).upsert(movedKf);
+
+    execute(
+      SetTrackCommand(
+        nodeId,
+        property,
+        before,
+        after,
+        label: 'Move Keyframe',
+        mergeKey: merge ? 'move-kf-$nodeId-$property' : null,
+      ),
+      merge: merge,
+    );
+
+    _selectedKeyframe = SelectedKeyframe(nodeId: nodeId, property: property, time: targetTime);
+    notifyListeners();
+  }
+
+  void updateKeyframeEasing(String nodeId, AnimProperty property, double time, Easing easing) {
+    if (!document.contains(nodeId)) return;
+    final anim = document.animations[nodeId];
+    final track = anim?.tracks[property];
+    if (track == null) return;
+
+    final idx = track.indexAt(time);
+    if (idx < 0) return;
+
+    final existingKf = track.keyframes[idx];
+    final updatedKf = existingKf.copyWith(easing: easing);
+
+    final before = track;
+    final after = track.upsert(updatedKf);
+
+    execute(
+      SetTrackCommand(
+        nodeId,
+        property,
+        before,
+        after,
+        label: 'Change Easing',
+      ),
+      merge: false,
+    );
+    notifyListeners();
+  }
+
+  void updateKeyframeValue(String nodeId, AnimProperty property, double time, double newValue) {
+    if (!document.contains(nodeId)) return;
+    final anim = document.animations[nodeId];
+    final track = anim?.tracks[property];
+    if (track == null) return;
+
+    final idx = track.indexAt(time);
+    if (idx < 0) return;
+
+    final existingKf = track.keyframes[idx];
+    final updatedKf = existingKf.copyWith(value: newValue);
+
+    final before = track;
+    final after = track.upsert(updatedKf);
+
+    execute(
+      SetTrackCommand(
+        nodeId,
+        property,
+        before,
+        after,
+        label: 'Edit Keyframe Value',
+      ),
+      merge: false,
+    );
+    notifyListeners();
+  }
+
+  void setDocumentDuration(double duration) {
+    if (duration <= 0.1) return;
+    execute(
+      UpdateDocumentCommand(
+        (doc) => doc.copyWith(duration: duration),
+        label: 'Change Duration',
+      ),
+      merge: false,
+    );
+    if (_currentTime > duration) {
+      seek(duration);
+    }
+  }
+
+  void setDocumentFps(double fps) {
+    if (fps <= 1) return;
+    execute(
+      UpdateDocumentCommand(
+        (doc) => doc.copyWith(fps: fps),
+        label: 'Change FPS',
+      ),
+      merge: false,
+    );
+  }
+
+  void jumpToNextKeyframe() {
+    final allTimes = <double>{};
+    for (final anim in document.animations.values) {
+      for (final t in anim.tracks.values) {
+        for (final k in t.keyframes) {
+          if (k.time > _currentTime + 1e-4) {
+            allTimes.add(k.time);
+          }
+        }
+      }
+    }
+    if (allTimes.isNotEmpty) {
+      final sorted = allTimes.toList()..sort();
+      seek(sorted.first);
+    }
+  }
+
+  void jumpToPrevKeyframe() {
+    final allTimes = <double>{};
+    for (final anim in document.animations.values) {
+      for (final t in anim.tracks.values) {
+        for (final k in t.keyframes) {
+          if (k.time < _currentTime - 1e-4) {
+            allTimes.add(k.time);
+          }
+        }
+      }
+    }
+    if (allTimes.isNotEmpty) {
+      final sorted = allTimes.toList()..sort();
+      seek(sorted.last);
     }
   }
 

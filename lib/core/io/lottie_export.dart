@@ -30,16 +30,38 @@ class LottieExporter {
     final layers = <Map<String, dynamic>>[];
     var index = 0;
 
+    // Build parent matrix mapping for nested shapes under groups
+    final parentMatrices = <String, Matrix2D>{};
+    for (final layer in doc.layers) {
+      _collectParentTransforms(layer, Matrix2D.identity, parentMatrices);
+    }
+
     for (final node in doc.walk()) {
       if (node is ShapeNode) {
         index++;
-        layers.add(_convertShapeLayer(node, index, doc));
+        final parentTransform = parentMatrices[node.id] ?? Matrix2D.identity;
+        layers.add(_convertShapeLayer(node, index, doc, parentTransform: parentTransform));
       }
     }
     return layers.reversed.toList(); // Lottie orders bottom-up
   }
 
-  static Map<String, dynamic> _convertShapeLayer(ShapeNode node, int index, Document doc) {
+  static void _collectParentTransforms(Node node, Matrix2D current, Map<String, Matrix2D> map) {
+    if (node is GroupNode) {
+      final combined = current.multiply(node.transform.toMatrix());
+      for (final child in node.children) {
+        map[child.id] = combined;
+        _collectParentTransforms(child, combined, map);
+      }
+    }
+  }
+
+  static Map<String, dynamic> _convertShapeLayer(
+    ShapeNode node,
+    int index,
+    Document doc, {
+    Matrix2D parentTransform = Matrix2D.identity,
+  }) {
     final anim = doc.animations[node.id];
 
     return {
@@ -48,7 +70,7 @@ class LottieExporter {
       'ty': 4, // 4 = Shape layer
       'nm': node.name.isNotEmpty ? node.name : node.typeName,
       'sr': 1,
-      'ks': _convertTransform(node, anim, doc.fps),
+      'ks': _convertTransform(node, anim, doc.fps, parentTransform: parentTransform),
       'ao': 0,
       'shapes': [_convertShapeGroup(node, anim, doc.fps)],
       'ip': 0,
@@ -58,8 +80,19 @@ class LottieExporter {
     };
   }
 
-  static Map<String, dynamic> _convertTransform(Node node, NodeAnimation? anim, double fps) {
+  static Map<String, dynamic> _convertTransform(
+    Node node,
+    NodeAnimation? anim,
+    double fps, {
+    Matrix2D parentTransform = Matrix2D.identity,
+  }) {
     final t = node.transform;
+    final parentTx = parentTransform.e;
+    final parentTy = parentTransform.f;
+
+    // Base position incorporates node.transform + node-specific offsets if any
+    final baseX = t.x;
+    final baseY = t.y;
 
     // Position (p)
     final posTrackX = anim?.tracks[AnimProperty.x];
@@ -69,12 +102,20 @@ class LottieExporter {
     if (posTrackX != null || posTrackY != null) {
       pos = {
         'a': 1, // Animated
-        'k': _animatedVector2(posTrackX, posTrackY, t.x, t.y, fps),
+        'k': _animatedVector2(
+          posTrackX,
+          posTrackY,
+          baseX,
+          baseY,
+          fps,
+          offsetX: parentTx,
+          offsetY: parentTy,
+        ),
       };
     } else {
       pos = {
         'a': 0,
-        'k': [t.x, t.y, 0],
+        'k': [baseX + parentTx, baseY + parentTy, 0],
       };
     }
 
@@ -165,7 +206,19 @@ class LottieExporter {
     }
 
     // 2. Fill (fl)
-    if (node.style.hasFill) {
+    final fillTrack = anim?.tracks[AnimProperty.fill];
+    if (fillTrack != null && fillTrack.keyframes.isNotEmpty) {
+      items.add({
+        'ty': 'fl',
+        'nm': 'Fill',
+        'c': {
+          'a': 1,
+          'k': _animatedColor(fillTrack, node.style.fill ?? RgbaColor.black, fps),
+        },
+        'o': {'a': 0, 'k': 100},
+        'r': 1,
+      });
+    } else if (node.style.hasFill) {
       final fill = node.style.fill!;
       items.add({
         'ty': 'fl',
@@ -180,7 +233,30 @@ class LottieExporter {
     }
 
     // 3. Stroke (st)
-    if (node.style.hasStroke) {
+    final strokeTrack = anim?.tracks[AnimProperty.stroke];
+    final strokeColorKeyframes = strokeTrack != null && strokeTrack.keyframes.isNotEmpty;
+    if (strokeColorKeyframes) {
+      items.add({
+        'ty': 'st',
+        'nm': 'Stroke',
+        'c': {
+          'a': 1,
+          'k': _animatedColor(strokeTrack, node.style.stroke ?? RgbaColor.black, fps),
+        },
+        'o': {'a': 0, 'k': 100},
+        'w': {'a': 0, 'k': node.style.strokeWidth},
+        'lc': switch (node.style.strokeCap) {
+          StrokeCap.butt => 1,
+          StrokeCap.round => 2,
+          StrokeCap.square => 3,
+        },
+        'lj': switch (node.style.strokeJoin) {
+          StrokeJoin.miter => 1,
+          StrokeJoin.round => 2,
+          StrokeJoin.bevel => 3,
+        },
+      });
+    } else if (node.style.hasStroke) {
       final stroke = node.style.stroke!;
       items.add({
         'ty': 'st',
@@ -245,14 +321,59 @@ class LottieExporter {
   }
 
   static List<Map<String, dynamic>> _animatedScalar(Track track, double baseValue, double fps, {double multiplier = 1.0}) {
-    return [
-      for (final k in track.keyframes)
-        {
-          't': (k.time * fps).round(),
-          's': [k.value * multiplier],
-          'h': k.easing.hold ? 1 : 0,
-        },
-    ];
+    final result = <Map<String, dynamic>>[];
+    final keyframes = track.keyframes;
+
+    for (var i = 0; i < keyframes.length; i++) {
+      final k = keyframes[i];
+      final item = <String, dynamic>{
+        't': (k.time * fps).round(),
+        's': [k.value * multiplier],
+      };
+
+      if (i < keyframes.length - 1) {
+        final nextK = keyframes[i + 1];
+        item['e'] = [nextK.value * multiplier];
+        if (k.easing.hold) {
+          item['h'] = 1;
+        } else {
+          item['o'] = {'x': [k.easing.x1], 'y': [k.easing.y1]};
+          item['i'] = {'x': [k.easing.x2], 'y': [k.easing.y2]};
+        }
+      }
+
+      result.add(item);
+    }
+    return result;
+  }
+
+  static List<Map<String, dynamic>> _animatedColor(Track track, RgbaColor baseColor, double fps) {
+    final result = <Map<String, dynamic>>[];
+    final keyframes = track.keyframes;
+
+    for (var i = 0; i < keyframes.length; i++) {
+      final k = keyframes[i];
+      final c = RgbaColor(k.value.toInt());
+      final item = <String, dynamic>{
+        't': (k.time * fps).round(),
+        's': [c.red / 255.0, c.green / 255.0, c.blue / 255.0, 1.0],
+      };
+
+      if (i < keyframes.length - 1) {
+        final nextK = keyframes[i + 1];
+        final nextC = RgbaColor(nextK.value.toInt());
+        item['e'] = [nextC.red / 255.0, nextC.green / 255.0, nextC.blue / 255.0, 1.0];
+        if (k.easing.hold) {
+          item['h'] = 1;
+        } else {
+          item['o'] = {'x': [k.easing.x1, k.easing.x1, k.easing.x1, k.easing.x1], 'y': [k.easing.y1, k.easing.y1, k.easing.y1, k.easing.y1]};
+          item['i'] = {'x': [k.easing.x2, k.easing.x2, k.easing.x2, k.easing.x2], 'y': [k.easing.y2, k.easing.y2, k.easing.y2, k.easing.y2]};
+        }
+      }
+
+      result.add(item);
+    }
+    return result;
   }
 
   static List<Map<String, dynamic>> _animatedVector2(
@@ -263,23 +384,48 @@ class LottieExporter {
     double fps, {
     double multiplier = 1.0,
     double zValue = 0.0,
+    double offsetX = 0.0,
+    double offsetY = 0.0,
   }) {
     final times = <double>{};
     if (trackX != null) times.addAll(trackX.keyframes.map((k) => k.time));
     if (trackY != null) times.addAll(trackY.keyframes.map((k) => k.time));
 
     final sortedTimes = times.toList()..sort();
+    final result = <Map<String, dynamic>>[];
 
-    return [
-      for (final t in sortedTimes)
-        {
-          't': (t * fps).round(),
-          's': [
-            (trackX?.valueAt(t) ?? baseX) * multiplier,
-            (trackY?.valueAt(t) ?? baseY) * multiplier,
-            zValue,
-          ],
-        },
-    ];
+    for (var i = 0; i < sortedTimes.length; i++) {
+      final t = sortedTimes[i];
+      final currentX = ((trackX?.valueAt(t) ?? baseX) + offsetX) * multiplier;
+      final currentY = ((trackY?.valueAt(t) ?? baseY) + offsetY) * multiplier;
+
+      final item = <String, dynamic>{
+        't': (t * fps).round(),
+        's': [currentX, currentY, zValue],
+      };
+
+      if (i < sortedTimes.length - 1) {
+        final nextT = sortedTimes[i + 1];
+        final nextX = ((trackX?.valueAt(nextT) ?? baseX) + offsetX) * multiplier;
+        final nextY = ((trackY?.valueAt(nextT) ?? baseY) + offsetY) * multiplier;
+        item['e'] = [nextX, nextY, zValue];
+
+        // Easing from keyframe on trackX or trackY at this time
+        final kX = trackX?.keyframes.where((k) => (k.time - t).abs() < 1e-4).firstOrNull;
+        final kY = trackY?.keyframes.where((k) => (k.time - t).abs() < 1e-4).firstOrNull;
+        final easing = kX?.easing ?? kY?.easing ?? Easing.linear;
+
+        if (easing.hold) {
+          item['h'] = 1;
+        } else {
+          item['o'] = {'x': [easing.x1, easing.x1], 'y': [easing.y1, easing.y1]};
+          item['i'] = {'x': [easing.x2, easing.x2], 'y': [easing.y2, easing.y2]};
+        }
+      }
+
+      result.add(item);
+    }
+
+    return result;
   }
 }

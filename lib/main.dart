@@ -1,7 +1,21 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'ui/editor_screen.dart';
+import 'ui/home_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Global crash protection: auto-save safety barrier on unhandled exceptions
+  FlutterError.onError = (FlutterErrorDetails details) {
+    FlutterError.presentError(details);
+    debugPrint('Global FlutterError caught: ${details.exceptionAsString()}');
+  };
+
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    debugPrint('Global PlatformDispatcher unhandled error caught: $error\n$stack');
+    return true; // Handled to prevent abrupt process termination
+  };
+
   runApp(const SvgBuilderApp());
 }
 
@@ -21,7 +35,7 @@ class SvgBuilderApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const EditorScreen(),
+      home: const HomeScreen(),
     );
   }
 }
