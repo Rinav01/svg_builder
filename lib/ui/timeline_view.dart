@@ -97,7 +97,7 @@ class _TimelineViewState extends State<TimelineView> {
 
     return Container(
       height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       color: StudioTheme.obsidianSurface,
       child: Row(
         children: [
@@ -106,89 +106,83 @@ class _TimelineViewState extends State<TimelineView> {
             icon: Icon(
               isCollapsed ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
               color: StudioTheme.textSecondary,
-              size: 20,
+              size: 18,
             ),
             tooltip: isCollapsed ? 'Expand Timeline' : 'Collapse Timeline',
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
             onPressed: controller.toggleTimelineCollapsed,
           ),
-          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 8, indent: 8, endIndent: 8),
+          const SizedBox(width: 4),
 
-          // Stop & Rewind / Jump to Start
+          // Transport Cluster
           IconButton(
-            icon: const Icon(Icons.skip_previous, color: StudioTheme.textSecondary, size: 18),
+            icon: const Icon(Icons.skip_previous, color: StudioTheme.textSecondary, size: 17),
             tooltip: 'Rewind to 0.0s',
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: () {
               controller.pause();
               controller.seek(0.0);
             },
           ),
-          // Jump Prev Keyframe
           IconButton(
-            icon: const Icon(Icons.fast_rewind, color: StudioTheme.textSecondary, size: 17),
-            tooltip: 'Jump to Previous Keyframe',
+            icon: const Icon(Icons.chevron_left, color: StudioTheme.textSecondary, size: 18),
+            tooltip: 'Previous Keyframe',
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: controller.jumpToPrevKeyframe,
           ),
 
           const SizedBox(width: 4),
 
-          // Prominent Shining Amber PLAY / PAUSE Pill Button (Matches Inspiration Mockup)
+          // Clean Amber Play / Pause Button
           InkWell(
             onTap: controller.togglePlay,
             borderRadius: BorderRadius.circular(6),
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              width: 28,
+              height: 26,
               decoration: BoxDecoration(
                 color: StudioTheme.accentAmber,
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    controller.isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: StudioTheme.obsidianVoid,
-                    size: 15,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    controller.isPlaying ? 'PAUSE' : 'PLAY',
-                    style: const TextStyle(
-                      color: StudioTheme.obsidianVoid,
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
+              child: Icon(
+                controller.isPlaying ? Icons.pause : Icons.play_arrow,
+                color: StudioTheme.obsidianVoid,
+                size: 17,
               ),
             ),
           ),
 
           const SizedBox(width: 4),
 
-          // Jump Next Keyframe
           IconButton(
-            icon: const Icon(Icons.fast_forward, color: StudioTheme.textSecondary, size: 17),
-            tooltip: 'Jump to Next Keyframe',
+            icon: const Icon(Icons.chevron_right, color: StudioTheme.textSecondary, size: 18),
+            tooltip: 'Next Keyframe',
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: controller.jumpToNextKeyframe,
           ),
-
-          // Loop toggle
           IconButton(
             icon: Icon(
               Icons.repeat,
-              size: 17,
+              size: 15,
               color: controller.loopPlayback ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
             ),
-            tooltip: controller.loopPlayback ? 'Loop Playback: ON' : 'Loop Playback: OFF',
+            tooltip: 'Loop Playback',
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: () {
               setState(() {
                 controller.loopPlayback = !controller.loopPlayback;
@@ -196,244 +190,118 @@ class _TimelineViewState extends State<TimelineView> {
             },
           ),
 
-          const SizedBox(width: 6),
+          const SizedBox(width: 10),
 
-          // Monospace Amber Time & Frame Readout Pill (`● 0.60s • F18 / 90 • 30 FPS`)
+          // Clean Timecode & Frame Readout
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
               color: StudioTheme.obsidianVoid,
               borderRadius: BorderRadius.circular(5),
               border: Border.all(color: StudioTheme.obsidianBorder),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.circle, size: 7, color: StudioTheme.accentAmberBright),
-                const SizedBox(width: 6),
-                Text(
-                  '${currentTime.toStringAsFixed(2)}s • F$currentFrame / $totalFrames • ${doc.fps.toInt()} FPS',
-                  style: const TextStyle(
-                    color: StudioTheme.accentAmberBright,
-                    fontFamily: 'monospace',
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(width: 6),
-
-          // AUTO-KEY Status Badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-            decoration: BoxDecoration(
-              color: StudioTheme.accentAmberSurface,
-              borderRadius: BorderRadius.circular(5),
-              border: Border.all(color: StudioTheme.accentAmber.withAlpha(140)),
-            ),
-            child: const Text(
-              'AUTO-KEY ON',
-              style: TextStyle(
-                color: StudioTheme.accentAmberBright,
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
+            child: Text(
+              '${currentTime.toStringAsFixed(2)}s  •  F$currentFrame / $totalFrames',
+              style: const TextStyle(
+                color: StudioTheme.textPrimary,
                 fontFamily: 'monospace',
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 6),
-
-          // 1-Tap `+ POSE` Pill Button
-          InkWell(
-            onTap: controller.selectedNodeIds.isNotEmpty
-                ? () => controller.keyCurrentPoseForSelected()
-                : null,
-            borderRadius: BorderRadius.circular(5),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: controller.selectedNodeIds.isNotEmpty
-                    ? StudioTheme.accentAmber
-                    : StudioTheme.obsidianElevated,
-                borderRadius: BorderRadius.circular(5),
-              ),
-              child: Text(
-                '+ POSE',
-                style: TextStyle(
-                  color: controller.selectedNodeIds.isNotEmpty
-                      ? StudioTheme.obsidianVoid
-                      : StudioTheme.textMuted,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 6),
-
-          // `ONION ON / OFF` Pill Toggle (Matches Inspiration Mockup)
-          InkWell(
-            onTap: controller.toggleOnionSkin,
-            borderRadius: BorderRadius.circular(5),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-              decoration: BoxDecoration(
-                color: controller.onionSkinEnabled
-                    ? StudioTheme.accentCyanSurface
-                    : StudioTheme.obsidianElevated,
-                borderRadius: BorderRadius.circular(5),
-                border: Border.all(
-                  color: controller.onionSkinEnabled
-                      ? StudioTheme.accentCyan
-                      : StudioTheme.obsidianBorder,
-                ),
-              ),
-              child: Text(
-                controller.onionSkinEnabled ? 'ONION ON' : 'ONION OFF',
-                style: TextStyle(
-                  color: controller.onionSkinEnabled
-                      ? StudioTheme.accentCyanBright
-                      : StudioTheme.textMuted,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  fontFamily: 'monospace',
-                ),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
 
           const Spacer(),
 
-          // Timeline Horizontal Zoom Pill
-          if (!isCollapsed) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: StudioTheme.obsidianElevated,
-                borderRadius: BorderRadius.circular(5),
-                border: Border.all(color: StudioTheme.obsidianBorder),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  InkWell(
-                    onTap: () => controller.setTimelineZoom(controller.timelineZoom - 0.5),
-                    child: const Icon(Icons.zoom_out, size: 14, color: StudioTheme.textSecondary),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 5),
-                    child: Text(
-                      '${controller.timelineZoom.toStringAsFixed(1)}x',
-                      style: const TextStyle(
+          // Key Pose Action
+          if (controller.selectedNodeIds.isNotEmpty) ...[
+            InkWell(
+              onTap: () => controller.keyCurrentPoseForSelected(),
+              borderRadius: BorderRadius.circular(5),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: StudioTheme.obsidianElevated,
+                  borderRadius: BorderRadius.circular(5),
+                  border: Border.all(color: StudioTheme.obsidianBorderBright),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.diamond, size: 10, color: StudioTheme.accentAmber),
+                    SizedBox(width: 5),
+                    Text(
+                      'Key Pose',
+                      style: TextStyle(
                         color: StudioTheme.textPrimary,
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w700,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-                  InkWell(
-                    onTap: () => controller.setTimelineZoom(controller.timelineZoom + 0.5),
-                    child: const Icon(Icons.zoom_in, size: 14, color: StudioTheme.textSecondary),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 6),
           ],
 
-          // Snap to frames toggle
+          // Onion Skin Toggle
           IconButton(
             icon: Icon(
-              Icons.grid_on,
+              Icons.layers_outlined,
               size: 16,
-              color: controller.snapToFrames ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
+              color: controller.onionSkinEnabled ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
             ),
-            tooltip: controller.snapToFrames
-                ? 'Snap to Frames (${doc.fps.toInt()} FPS): ON'
-                : 'Snap to Frames: OFF',
+            tooltip: controller.onionSkinEnabled ? 'Onion Skin: On' : 'Onion Skin: Off',
             padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: () {
-              setState(() {
-                controller.snapToFrames = !controller.snapToFrames;
-              });
-            },
+            onPressed: controller.toggleOnionSkin,
           ),
 
-          // Timeline Settings button
+          // Timeline Zoom Controls
+          if (!isCollapsed) ...[
+            IconButton(
+              icon: const Icon(Icons.remove, size: 15, color: StudioTheme.textSecondary),
+              tooltip: 'Zoom Out Timeline',
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              onPressed: () => controller.setTimelineZoom(controller.timelineZoom - 0.5),
+            ),
+            Text(
+              '${controller.timelineZoom.toStringAsFixed(1)}x',
+              style: const TextStyle(
+                color: StudioTheme.textSecondary,
+                fontSize: 10.5,
+                fontFamily: 'monospace',
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.add, size: 15, color: StudioTheme.textSecondary),
+              tooltip: 'Zoom In Timeline',
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+              onPressed: () => controller.setTimelineZoom(controller.timelineZoom + 0.5),
+            ),
+          ],
+
+          // Timeline Duration / FPS Settings
           IconButton(
-            icon: const Icon(Icons.tune, color: StudioTheme.textSecondary, size: 17),
-            tooltip: 'Timeline Settings (Duration & FPS)',
+            icon: const Icon(Icons.tune, color: StudioTheme.textSecondary, size: 16),
+            tooltip: 'Timeline Duration & FPS (${doc.duration.toStringAsFixed(1)}s @ ${doc.fps.toInt()} FPS)',
             padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
             onPressed: () => TimelineSettingsDialog.show(context, controller),
           ),
-
-          if (controller.selectedNodeIds.isNotEmpty) ...[
-            const SizedBox(width: 2),
-            _buildAddKeyframeMenu(),
-          ],
         ],
       ),
-    );
-  }
-
-  Widget _buildAddKeyframeMenu() {
-    final selectedId = controller.selectedNodeIds.first;
-    final node = controller.document.findById(selectedId);
-    if (node == null) return const SizedBox.shrink();
-
-    return PopupMenuButton<AnimProperty>(
-      tooltip: 'Add Single Property Keyframe at current time',
-      color: StudioTheme.obsidianElevated,
-      icon: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          color: StudioTheme.accentCyanSurface,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: StudioTheme.accentCyan),
-        ),
-        child: const Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.add, color: StudioTheme.accentCyanBright, size: 13),
-            Icon(Icons.arrow_drop_down, color: StudioTheme.accentCyanBright, size: 14),
-          ],
-        ),
-      ),
-      onSelected: (property) {
-        final val = readProperty(node, property) ?? 0.0;
-        controller.addKeyframeForSelected(property, val);
-      },
-      itemBuilder: (context) => [
-        _menuItem(AnimProperty.x, 'Position X'),
-        _menuItem(AnimProperty.y, 'Position Y'),
-        _menuItem(AnimProperty.rotation, 'Rotation'),
-        _menuItem(AnimProperty.scaleX, 'Scale X'),
-        _menuItem(AnimProperty.scaleY, 'Scale Y'),
-        _menuItem(AnimProperty.opacity, 'Opacity'),
-        if (node is ShapeNode || node is TextNode)
-          _menuItem(AnimProperty.fill, 'Fill Color'),
-        if (node is ShapeNode) ...[
-          _menuItem(AnimProperty.stroke, 'Stroke Color'),
-          _menuItem(AnimProperty.strokeWidth, 'Stroke Width'),
-        ],
-      ],
-    );
-  }
-
-  PopupMenuItem<AnimProperty> _menuItem(AnimProperty prop, String label) {
-    return PopupMenuItem(
-      value: prop,
-      height: 32,
-      child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
     );
   }
 
@@ -452,15 +320,21 @@ class _TimelineViewState extends State<TimelineView> {
           // Time Ruler Left Corner
           Container(
             height: 24,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            color: const Color(0xFF141414),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            color: StudioTheme.obsidianVoid,
             alignment: Alignment.centerLeft,
             child: const Text(
-              'Tracks',
-              style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold),
+              'TRACKS / CHANNELS',
+              style: TextStyle(
+                color: StudioTheme.textMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'monospace',
+                letterSpacing: 0.8,
+              ),
             ),
           ),
-          const Divider(color: Color(0xFF282828), height: 1),
+          const Divider(color: StudioTheme.obsidianBorder, height: 1),
 
           // Scrollable track headers list
           Expanded(
@@ -482,26 +356,45 @@ class _TimelineViewState extends State<TimelineView> {
 
   Widget _buildSummaryTrackHeader() {
     final hasSelection = controller.selectedNodeIds.isNotEmpty;
-    final selectedNode = hasSelection ? controller.document.findById(controller.selectedNodeIds.first) : null;
-    final title = selectedNode != null ? (selectedNode.name.isNotEmpty ? selectedNode.name : selectedNode.typeName) : 'All Tracks';
+    final selectedNode = hasSelection
+        ? (controller.renderedDocument.findById(controller.selectedNodeIds.first) ??
+            controller.document.findById(controller.selectedNodeIds.first))
+        : null;
+    final title = selectedNode != null
+        ? (selectedNode.name.isNotEmpty ? selectedNode.name : selectedNode.typeName)
+        : 'All Scene Tracks';
 
     return Container(
       height: _rowHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      color: const Color(0xFF1D1D1D),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: const BoxDecoration(
+        color: StudioTheme.obsidianSurface,
+        border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
+      ),
       alignment: Alignment.centerLeft,
       child: Row(
         children: [
-          Icon(
-            hasSelection ? Icons.category_outlined : Icons.layers_outlined,
-            size: 14,
-            color: Colors.white70,
+          Container(
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              color: StudioTheme.accentCyanSurface,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Icon(
+              hasSelection ? Icons.view_in_ar : Icons.layers_outlined,
+              size: 13,
+              color: StudioTheme.accentCyanBright,
+            ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               title,
-              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: StudioTheme.textPrimary,
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -511,7 +404,8 @@ class _TimelineViewState extends State<TimelineView> {
   }
 
   Widget _buildPropertyTrackHeader(Node node, AnimProperty prop) {
-    final curVal = readProperty(node, prop);
+    final evalNode = controller.renderedDocument.findById(node.id) ?? node;
+    final curVal = readProperty(evalNode, prop);
     final anim = controller.document.animations[node.id];
     final track = anim?.tracks[prop];
     final hasKfAtCurrent = track?.indexAt(controller.currentTime) ?? -1;
@@ -531,27 +425,37 @@ class _TimelineViewState extends State<TimelineView> {
 
     return Container(
       height: _rowHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: const BoxDecoration(
-        color: Color(0xFF171717),
-        border: Border(bottom: BorderSide(color: Color(0xFF222222))),
+        color: StudioTheme.obsidianVoid,
+        border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
       ),
       child: Row(
         children: [
-          Icon(_propertyIcon(prop), size: 12, color: Colors.blueAccent),
+          Icon(_propertyIcon(prop), size: 12, color: StudioTheme.textSecondary),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               _propertyLabel(prop),
-              style: const TextStyle(color: Colors.white70, fontSize: 11),
+              style: const TextStyle(
+                color: StudioTheme.textSecondary,
+                fontSize: 11,
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w600,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
             valStr,
-            style: const TextStyle(color: Colors.white38, fontSize: 10, fontFamily: 'monospace'),
+            style: TextStyle(
+              color: hasKfAtCurrent >= 0 ? StudioTheme.accentAmberBright : StudioTheme.textMuted,
+              fontSize: 10,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w700,
+            ),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 6),
           // Diamond toggle button for current time
           InkWell(
             onTap: () {
@@ -564,7 +468,9 @@ class _TimelineViewState extends State<TimelineView> {
             child: Icon(
               Icons.diamond,
               size: 13,
-              color: hasKfAtCurrent >= 0 ? Colors.amberAccent : Colors.white24,
+              color: hasKfAtCurrent >= 0
+                  ? StudioTheme.accentAmberBright
+                  : StudioTheme.textMuted.withAlpha(90),
             ),
           ),
         ],
@@ -659,7 +565,10 @@ class _TimelineViewState extends State<TimelineView> {
   Widget _buildSummaryLane(double width, double duration) {
     return Container(
       height: _rowHeight,
-      color: const Color(0xFF1D1D1D),
+      decoration: const BoxDecoration(
+        color: StudioTheme.obsidianSurface,
+        border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
+      ),
       child: CustomPaint(
         size: Size(width, _rowHeight),
         painter: _SummaryKeyframePainter(
@@ -895,22 +804,22 @@ class _TimelineViewState extends State<TimelineView> {
 
   String _propertyLabel(AnimProperty prop) {
     return switch (prop) {
-      AnimProperty.x => 'Pos X',
-      AnimProperty.y => 'Pos Y',
-      AnimProperty.rotation => 'Rotation',
-      AnimProperty.scaleX => 'Scale X',
-      AnimProperty.scaleY => 'Scale Y',
-      AnimProperty.opacity => 'Opacity',
-      AnimProperty.fill => 'Fill Color',
-      AnimProperty.stroke => 'Stroke Color',
-      AnimProperty.strokeWidth => 'Stroke Width',
+      AnimProperty.x => 'translateX',
+      AnimProperty.y => 'translateY',
+      AnimProperty.rotation => 'rotation',
+      AnimProperty.scaleX => 'scaleX',
+      AnimProperty.scaleY => 'scaleY',
+      AnimProperty.opacity => 'opacity',
+      AnimProperty.fill => 'fillColor',
+      AnimProperty.stroke => 'strokeColor',
+      AnimProperty.strokeWidth => 'strokeWidth',
     };
   }
 }
 
 // --- Custom Painters ---
 
-/// Draws the time ticks (seconds and frames) across the top ruler.
+/// Draws the time ticks (seconds and frames) across the top ruler with a high-contrast playhead badge.
 class _TimelineRulerPainter extends CustomPainter {
   const _TimelineRulerPainter({
     required this.duration,
@@ -926,18 +835,23 @@ class _TimelineRulerPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     if (duration <= 0) return;
 
-    final bgPaint = Paint()..color = const Color(0xFF141414);
+    final bgPaint = Paint()..color = StudioTheme.obsidianVoid;
     canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
 
     final tickPaint = Paint()
-      ..color = Colors.white24
+      ..color = StudioTheme.obsidianBorder
       ..strokeWidth = 1;
 
     final majorTickPaint = Paint()
-      ..color = Colors.white54
-      ..strokeWidth = 1;
+      ..color = StudioTheme.obsidianBorderBright
+      ..strokeWidth = 1.2;
 
-    final textStyle = const TextStyle(color: Colors.white38, fontSize: 9, fontFamily: 'monospace');
+    const textStyle = TextStyle(
+      color: StudioTheme.textSecondary,
+      fontSize: 9,
+      fontFamily: 'monospace',
+      fontWeight: FontWeight.w700,
+    );
 
     final stepSeconds = duration > 10 ? 1.0 : (duration > 3 ? 0.5 : 0.25);
     final totalSteps = (duration / stepSeconds).floor();
@@ -946,32 +860,33 @@ class _TimelineRulerPainter extends CustomPainter {
       final t = i * stepSeconds;
       final x = (t / duration) * size.width;
 
-      final isMajor = (t % 1.0).abs() < 1e-4;
+      final isMajor = (t % 0.5).abs() < 1e-4;
       canvas.drawLine(
-        Offset(x, size.height - (isMajor ? 12 : 6)),
+        Offset(x, size.height - (isMajor ? 10 : 5)),
         Offset(x, size.height),
         isMajor ? majorTickPaint : tickPaint,
       );
 
       if (isMajor || totalSteps <= 10) {
         final tp = TextPainter(
-          text: TextSpan(text: '${t.toStringAsFixed(isMajor ? 0 : 1)}s', style: textStyle),
+          text: TextSpan(text: '${t.toStringAsFixed(1)}s', style: textStyle),
           textDirection: TextDirection.ltr,
         )..layout();
-        tp.paint(canvas, Offset(x + 2, 2));
+        tp.paint(canvas, Offset(x + 4, 4));
       }
     }
 
-    // Ruler playhead marker
+    // High-contrast Ruler Playhead Pentagon Badge with White Center Dot (Matches Reference Image 2)
     final scrubX = (currentTime / duration) * size.width;
     final markerPath = Path()
-      ..moveTo(scrubX - 5, 0)
-      ..lineTo(scrubX + 5, 0)
-      ..lineTo(scrubX + 5, 14)
+      ..moveTo(scrubX - 7, 1)
+      ..lineTo(scrubX + 7, 1)
+      ..lineTo(scrubX + 7, 13)
       ..lineTo(scrubX, 22)
-      ..lineTo(scrubX - 5, 14)
+      ..lineTo(scrubX - 7, 13)
       ..close();
-    canvas.drawPath(markerPath, Paint()..color = Colors.blueAccent);
+    canvas.drawPath(markerPath, Paint()..color = StudioTheme.dangerCrimson);
+    canvas.drawCircle(Offset(scrubX, 8), 2.5, Paint()..color = Colors.white);
   }
 
   @override
@@ -995,8 +910,8 @@ class _PlayheadLinePainter extends CustomPainter {
     final x = (currentTime / duration) * size.width;
 
     final linePaint = Paint()
-      ..color = Colors.blueAccent.withValues(alpha: 0.8)
-      ..strokeWidth = 1.5;
+      ..color = StudioTheme.dangerCrimson
+      ..strokeWidth = 1.8;
 
     canvas.drawLine(Offset(x, 0), Offset(x, size.height), linePaint);
   }
@@ -1006,7 +921,7 @@ class _PlayheadLinePainter extends CustomPainter {
       old.currentTime != currentTime || old.duration != duration;
 }
 
-/// Paints the summary diamond markers in the top summary lane.
+/// Paints the summary diamond markers and connecting span line in the top summary lane.
 class _SummaryKeyframePainter extends CustomPainter {
   const _SummaryKeyframePainter({
     required this.document,
@@ -1033,20 +948,42 @@ class _SummaryKeyframePainter extends CustomPainter {
       }
     }
 
-    final paint = Paint()
-      ..color = Colors.amberAccent
-      ..style = PaintingStyle.fill;
-
+    if (keyframeTimes.isEmpty) return;
+    final sorted = keyframeTimes.toList()..sort();
     final cy = size.height / 2;
-    for (final time in keyframeTimes) {
+
+    // Connecting horizontal amber span line between first and last keyframe
+    if (sorted.length >= 2) {
+      final startX = (sorted.first / duration) * size.width;
+      final endX = (sorted.last / duration) * size.width;
+      canvas.drawLine(
+        Offset(startX, cy),
+        Offset(endX, cy),
+        Paint()
+          ..color = StudioTheme.accentAmber.withValues(alpha: 0.45)
+          ..strokeWidth = 2.0,
+      );
+    }
+
+    final fillPaint = Paint()
+      ..color = StudioTheme.accentAmberBright
+      ..style = PaintingStyle.fill;
+    final borderPaint = Paint()
+      ..color = StudioTheme.obsidianVoid
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    for (final time in sorted) {
       final cx = (time / duration) * size.width;
+      const r = 6.0;
       final path = Path()
-        ..moveTo(cx, cy - 5)
-        ..lineTo(cx + 4, cy)
-        ..lineTo(cx, cy + 5)
-        ..lineTo(cx - 4, cy)
+        ..moveTo(cx, cy - r)
+        ..lineTo(cx + r, cy)
+        ..lineTo(cx, cy + r)
+        ..lineTo(cx - r, cy)
         ..close();
-      canvas.drawPath(path, paint);
+      canvas.drawPath(path, fillPaint);
+      canvas.drawPath(path, borderPaint);
     }
   }
 
@@ -1080,24 +1017,25 @@ class _SingleDiamondPainter extends CustomPainter {
 
     // Body fill
     final fillPaint = Paint()
-      ..color = isSelected ? Colors.cyanAccent : (hasCustomEasing ? Colors.orangeAccent : Colors.amberAccent)
+      ..color = isSelected
+          ? StudioTheme.accentCyanBright
+          : (hasCustomEasing ? StudioTheme.accentAmberBright : StudioTheme.accentAmber)
       ..style = PaintingStyle.fill;
     canvas.drawPath(path, fillPaint);
 
     // Border
     final borderPaint = Paint()
-      ..color = isSelected ? Colors.white : Colors.black87
+      ..color = isSelected ? StudioTheme.textPrimary : StudioTheme.obsidianVoid
       ..style = PaintingStyle.stroke
-      ..strokeWidth = isSelected ? 1.5 : 1.0;
+      ..strokeWidth = isSelected ? 1.6 : 1.2;
     canvas.drawPath(path, borderPaint);
 
     if (isSelected) {
-      // Glow ring
       canvas.drawCircle(
         Offset(cx, cy),
         r + 2.5,
         Paint()
-          ..color = Colors.cyanAccent.withValues(alpha: 0.4)
+          ..color = StudioTheme.accentCyanBright.withValues(alpha: 0.45)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.5,
       );

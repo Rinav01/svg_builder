@@ -20,8 +20,8 @@ class HandleInfo {
 
 /// Helper calculations for 4 corner scaling handles and 1 top rotation handle.
 class SelectionTransformHelper {
-  static const double rotationHandleOffset = 24.0;
-  static const double handleHitRadius = 14.0;
+  static const double rotationHandleOffset = 28.0;
+  static const double handleHitRadius = 22.0;
 
   /// Returns bounding handles in local node coordinates.
   static List<HandleInfo> getHandles(Bounds b) {

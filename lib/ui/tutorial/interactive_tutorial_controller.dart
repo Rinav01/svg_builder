@@ -89,6 +89,7 @@ class InteractiveTutorialController extends ChangeNotifier {
   void startTutorial() {
     _isActive = true;
     _currentStepIndex = 0;
+    editorController.currentTool = EditorTool.select;
     if (editorController.isTimelineCollapsed) {
       editorController.toggleTimelineCollapsed();
     }

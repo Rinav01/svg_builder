@@ -165,6 +165,10 @@ class PathData {
 
   static const double _kappa = 0.5522847498307936;
 
+  static final Expando<Bounds> _boundsCache = Expando<Bounds>('PathData.bounds');
+  static final Expando<List<Polyline>> _defaultFlattenCache =
+      Expando<List<Polyline>>('PathData.flatten');
+
   final List<PathSegment> segments;
 
   bool get isEmpty => segments.isEmpty;
@@ -200,7 +204,11 @@ class PathData {
   }
 
   /// Tight geometric bounds (curve extrema, not control points).
+  /// Cached in O(1) via Expando on immutable [PathData] instances.
   Bounds get bounds {
+    final cached = _boundsCache[this];
+    if (cached != null) return cached;
+
     var b = Bounds.empty;
     var current = Vec2.zero;
     var start = Vec2.zero;
@@ -224,6 +232,7 @@ class PathData {
           current = start;
       }
     }
+    _boundsCache[this] = b;
     return b;
   }
 
@@ -270,7 +279,14 @@ class PathData {
   }
 
   /// Converts curves to polylines with roughly [tolerance] max deviation.
+  /// Caches default [tolerance] == 0.25 results in O(1) via Expando.
   List<Polyline> flatten({double tolerance = 0.25}) {
+    final isDefaultTol = (tolerance - 0.25).abs() < 1e-6;
+    if (isDefaultTol) {
+      final cached = _defaultFlattenCache[this];
+      if (cached != null) return cached;
+    }
+
     final result = <Polyline>[];
     var pts = <Vec2>[];
     var current = Vec2.zero;
@@ -314,6 +330,9 @@ class PathData {
       }
     }
     flush(closed: false);
+    if (isDefaultTol) {
+      _defaultFlattenCache[this] = result;
+    }
     return result;
   }
 

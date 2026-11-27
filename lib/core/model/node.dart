@@ -247,12 +247,19 @@ class RectNode extends ShapeNode {
 
   final double x, y, width, height, cornerRadius;
 
+  static final Expando<PathData> _rectPathCache = Expando<PathData>('RectNode.toPath');
+
   @override
   String get typeName => 'Rectangle';
 
   @override
-  PathData toPath() =>
-      PathData.rect(x, y, width, height, rx: cornerRadius);
+  PathData toPath() {
+    final cached = _rectPathCache[this];
+    if (cached != null) return cached;
+    final p = PathData.rect(x, y, width, height, rx: cornerRadius);
+    _rectPathCache[this] = p;
+    return p;
+  }
 
   @override
   Bounds get localBounds => Bounds.fromLTWH(x, y, width, height);
@@ -321,11 +328,19 @@ class EllipseNode extends ShapeNode {
 
   final double cx, cy, rx, ry;
 
+  static final Expando<PathData> _ellipsePathCache = Expando<PathData>('EllipseNode.toPath');
+
   @override
   String get typeName => 'Ellipse';
 
   @override
-  PathData toPath() => PathData.ellipse(cx, cy, rx, ry);
+  PathData toPath() {
+    final cached = _ellipsePathCache[this];
+    if (cached != null) return cached;
+    final p = PathData.ellipse(cx, cy, rx, ry);
+    _ellipsePathCache[this] = p;
+    return p;
+  }
 
   @override
   Bounds get localBounds => Bounds(cx - rx, cy - ry, cx + rx, cy + ry);

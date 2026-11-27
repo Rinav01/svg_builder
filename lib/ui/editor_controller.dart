@@ -85,6 +85,12 @@ class EditorController extends ChangeNotifier {
               ),
         ) {
     _history.onChanged = (doc) {
+      if (_isInteractiveDragging) {
+        // Fast-path 120Hz drag: only repaint the isolated canvas layer!
+        // Sidebars, Timeline, AppBar, and AutoSave are synced once when the pointer lifts.
+        canvasRepaintNotifier.value++;
+        return;
+      }
       onDocumentChanged?.call(doc);
       notifyListeners();
     };
@@ -92,6 +98,14 @@ class EditorController extends ChangeNotifier {
 
   final History _history;
   IdGenerator _idGen = IdGenerator();
+
+  /// True while an active pointer is dragging a transform handle, shape preview, or path anchor.
+  /// Suppresses expensive global widget tree rebuilds and auto-save timer resets during 120Hz motion.
+  bool _isInteractiveDragging = false;
+  bool get isInteractiveDragging => _isInteractiveDragging;
+
+  /// High-frequency repaint signal exclusively for [CanvasView] during 120Hz interactive drags.
+  final ValueNotifier<int> canvasRepaintNotifier = ValueNotifier<int>(0);
 
   /// Callback fired only when a command mutates the document (e.g. for debounced auto-save).
   void Function(Document doc)? onDocumentChanged;
@@ -110,6 +124,12 @@ class EditorController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool showGrid = true;
+  void toggleShowGrid() {
+    showGrid = !showGrid;
+    notifyListeners();
+  }
+
   /// Generates a unique node ID guaranteed not to collide with any ID in the document.
   String nextId() {
     String id;
@@ -119,8 +139,8 @@ class EditorController extends ChangeNotifier {
     return id;
   }
 
-  // --- Tool State ---
-  EditorTool _currentTool = EditorTool.pen;
+  // --- Tool State (Defaults to SELECT so tapping objects on canvas immediately selects/drags) ---
+  EditorTool _currentTool = EditorTool.select;
   EditorTool get currentTool => _currentTool;
   set currentTool(EditorTool tool) {
     if (_currentTool != tool) {
@@ -1016,16 +1036,18 @@ class EditorController extends ChangeNotifier {
 
   // --- Marquee Rubber-Band Selection ---
   void beginMarquee(Vec2 startDocPoint) {
+    _isInteractiveDragging = true;
     marqueeBounds = Bounds.fromPoints([startDocPoint, startDocPoint]);
-    notifyListeners();
+    canvasRepaintNotifier.value++;
   }
 
   void updateMarquee(Vec2 startDocPoint, Vec2 currentDocPoint) {
     marqueeBounds = Bounds.fromPoints([startDocPoint, currentDocPoint]);
-    notifyListeners();
+    canvasRepaintNotifier.value++;
   }
 
   void endMarquee({bool additive = false}) {
+    _isInteractiveDragging = false;
     final rect = marqueeBounds;
     marqueeBounds = null;
     if (rect == null || (rect.width < 3 && rect.height < 3)) {
@@ -1033,13 +1055,14 @@ class EditorController extends ChangeNotifier {
       return;
     }
 
+    final evalDoc = renderedDocument;
     if (!additive && !multiSelectMode) {
       _selectedNodeIds.clear();
     }
 
-    for (final node in document.walk()) {
+    for (final node in evalDoc.walk()) {
       if (node is GroupNode || !node.visible || node.locked) continue;
-      final ancestry = document.ancestry(node.id);
+      final ancestry = evalDoc.ancestry(node.id);
       if (ancestry.any((a) => !a.visible || a.locked)) continue;
 
       final fullMatrix = concatTransforms(ancestry);
@@ -1316,17 +1339,19 @@ class EditorController extends ChangeNotifier {
 
   // --- Shape Drag Handling ---
   void beginShape(Vec2 start) {
+    _isInteractiveDragging = true;
     shapeDragStart = start;
     shapeDragCurrent = start;
-    notifyListeners();
+    canvasRepaintNotifier.value++;
   }
 
   void updateShape(Vec2 current) {
     shapeDragCurrent = current;
-    notifyListeners();
+    canvasRepaintNotifier.value++;
   }
 
   void endShape() {
+    _isInteractiveDragging = false;
     if (shapeDragStart != null && shapeDragCurrent != null) {
       final p1 = shapeDragStart!;
       final p2 = shapeDragCurrent!;
@@ -1369,6 +1394,7 @@ class EditorController extends ChangeNotifier {
 
         if (node != null) {
           execute(AddNodeCommand(node, parentId: activeLayerId), merge: false);
+          selectOnly(node.id);
         }
       }
     }
@@ -1384,6 +1410,7 @@ class EditorController extends ChangeNotifier {
     final node = document.findById(nodeId);
     if (node is! PathNode) return;
 
+    _isInteractiveDragging = true;
     activeNodeEditId = nodeId;
     activePathPointHandle = handle;
     initialPathData = node.path;
@@ -1413,19 +1440,27 @@ class EditorController extends ChangeNotifier {
   }
 
   void endPathNodeDrag() {
+    final wasDragging = _isInteractiveDragging;
+    _isInteractiveDragging = false;
     activeNodeEditId = null;
     activePathPointHandle = null;
     initialPathData = null;
     commitMerge();
+    if (wasDragging) {
+      onDocumentChanged?.call(document);
+      notifyListeners();
+    }
   }
 
   // --- Interactive Transform Drag Handling ---
   Node? _transformDragInitialNode;
 
   void beginTransformDrag(String nodeId, Vec2 startPoint, {HandleType? handle}) {
-    final node = document.findById(nodeId);
+    final evalDoc = renderedDocument;
+    final node = evalDoc.findById(nodeId) ?? document.findById(nodeId);
     if (node == null) return;
 
+    _isInteractiveDragging = true;
     transformDragNodeId = nodeId;
     transformDragStart = startPoint;
     transformDragInitial = node.transform;
@@ -1713,6 +1748,8 @@ class EditorController extends ChangeNotifier {
   }
 
   void endTransformDrag() {
+    final wasDragging = _isInteractiveDragging;
+    _isInteractiveDragging = false;
     transformDragNodeId = null;
     transformDragStart = null;
     transformDragInitial = null;
@@ -1720,11 +1757,12 @@ class EditorController extends ChangeNotifier {
     _transformDragInitialNode = null;
     transformMode = null;
     activeHandle = null;
-    if (activeSmartGuides.isNotEmpty) {
-      activeSmartGuides = const [];
+    activeSmartGuides = const [];
+    commitMerge();
+    if (wasDragging) {
+      onDocumentChanged?.call(document);
       notifyListeners();
     }
-    commitMerge();
   }
 
   @override
@@ -1732,6 +1770,7 @@ class EditorController extends ChangeNotifier {
     activeStrokeNotifier.dispose();
     playheadNotifier.dispose();
     isPlayingNotifier.dispose();
+    canvasRepaintNotifier.dispose();
     _ticker?.dispose();
     super.dispose();
   }

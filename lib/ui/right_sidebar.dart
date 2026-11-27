@@ -7,15 +7,15 @@ import 'theme/studio_theme.dart';
 
 enum SidebarTab { layers, properties }
 
-/// Unified right sidebar (or bottom inspector sheet in portrait) hosting
-/// `LAYERS (N)` and `PROPERTIES` in solid matte tabs with cyan underline indicators.
+/// Sleek, Figma/Rive-inspired Inspector Sidebar (`276dp` width) with a clean
+/// segmented pill switcher (`Design` | `Layers (N)`).
 class RightSidebar extends StatefulWidget {
   const RightSidebar({
     super.key,
     required this.controller,
     required this.onClose,
     this.initialTab = SidebarTab.properties,
-    this.width = 290,
+    this.width = 276,
   });
 
   final EditorController controller;
@@ -54,37 +54,49 @@ class _RightSidebarState extends State<RightSidebar> {
           ),
           child: Column(
             children: [
-              // Clean Underline Tab Bar Header matching inspiration (`LAYERS (4)` | `PROPERTIES`)
+              // Clean Segmented Switcher Header
               Container(
-                height: 40,
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                 color: StudioTheme.obsidianSurface,
                 child: Row(
                   children: [
                     Expanded(
-                      child: _tabButton(
-                        'LAYERS ($totalElements)',
-                        SidebarTab.layers,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.obsidianVoid,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: StudioTheme.obsidianBorder),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: _segmentTab('Inspector', SidebarTab.properties),
+                            ),
+                            Expanded(
+                              child: _segmentTab('Layers ($totalElements)', SidebarTab.layers),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    Expanded(
-                      child: _tabButton(
-                        'PROPERTIES',
-                        SidebarTab.properties,
-                      ),
-                    ),
+                    const SizedBox(width: 6),
                     IconButton(
-                      icon: const Icon(Icons.close, size: 15, color: StudioTheme.textSecondary),
-                      tooltip: 'Close Inspector',
+                      icon: const Icon(Icons.close, size: 15, color: StudioTheme.textMuted),
+                      tooltip: 'Hide Inspector',
                       onPressed: widget.onClose,
                       padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                      visualDensity: VisualDensity.compact,
+                      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+                      constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
                     ),
                   ],
                 ),
               ),
               const Divider(color: StudioTheme.obsidianBorder, height: 1),
 
-              // Active tab view
+              // Active Tab Content
               Expanded(
                 child: _activeTab == SidebarTab.layers
                     ? LayersPanel(
@@ -103,29 +115,23 @@ class _RightSidebarState extends State<RightSidebar> {
     );
   }
 
-  Widget _tabButton(String title, SidebarTab tab) {
+  Widget _segmentTab(String title, SidebarTab tab) {
     final isActive = _activeTab == tab;
-    return InkWell(
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onTap: () => setState(() => _activeTab = tab),
       child: Container(
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: isActive ? StudioTheme.obsidianElevated : StudioTheme.obsidianSurface,
-          border: Border(
-            bottom: BorderSide(
-              color: isActive ? StudioTheme.accentCyanBright : Colors.transparent,
-              width: 2.0,
-            ),
-          ),
+          color: isActive ? StudioTheme.obsidianElevated : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
         ),
         child: Text(
           title,
           style: TextStyle(
-            color: isActive ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            fontFamily: 'monospace',
-            letterSpacing: 0.6,
+            color: isActive ? StudioTheme.textPrimary : StudioTheme.textSecondary,
+            fontSize: 11.5,
+            fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
           ),
         ),
       ),

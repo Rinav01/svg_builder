@@ -3,11 +3,9 @@ import '../core/core.dart';
 import 'editor_controller.dart';
 import 'theme/studio_theme.dart';
 
-/// Side panel for inspecting, managing, and reordering document layers & nodes.
+/// Clean, Linear/Figma-style Layer Hierarchy tree.
 ///
-/// Displays layers in industry-standard top-to-bottom visual stacking order:
-/// the top item in the list is the front-most canvas layer (`layers.last`),
-/// and the bottom item is the background layer (`layers.first`).
+/// Top of list = Front-most canvas layer; Bottom of list = Background layer.
 class LayersPanel extends StatelessWidget {
   const LayersPanel({
     super.key,
@@ -31,66 +29,58 @@ class LayersPanel extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Action Toolbar (Add Layer, Group, Ungroup, Delete)
+              // Subtle Layer Action Bar
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                color: StudioTheme.obsidianVoid,
+                height: 36,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                color: StudioTheme.obsidianSurface,
                 child: Row(
                   children: [
-                    TextButton.icon(
-                      style: TextButton.styleFrom(
-                        backgroundColor: StudioTheme.obsidianElevated,
-                        foregroundColor: StudioTheme.accentCyanBright,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        minimumSize: const Size(0, 28),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: StudioTheme.obsidianBorder),
-                        ),
+                    const Text(
+                      'Scene Graph',
+                      style: TextStyle(
+                        color: StudioTheme.textSecondary,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
                       ),
-                      icon: const Icon(Icons.add, size: 15),
-                      label: const Text('New Layer', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-                      onPressed: () => controller.addLayer(),
                     ),
-                    const SizedBox(width: 6),
+                    const Spacer(),
                     if (controller.selectedNodeIds.length >= 2)
-                      IconButton(
-                        icon: const Icon(Icons.folder_outlined, size: 17, color: StudioTheme.accentCyanBright),
-                        tooltip: 'Group selected elements',
-                        onPressed: () => controller.groupSelected(),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      _headerIconBtn(
+                        icon: Icons.folder_outlined,
+                        tooltip: 'Group Selected',
+                        onTap: controller.groupSelected,
                       ),
                     if (controller.selectedNodeIds.any((id) => controller.document.findById(id) is GroupNode))
-                      IconButton(
-                        icon: const Icon(Icons.folder_open_outlined, size: 17, color: StudioTheme.accentAmber),
-                        tooltip: 'Ungroup selected group',
-                        onPressed: () => controller.ungroupSelected(),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      _headerIconBtn(
+                        icon: Icons.folder_open_outlined,
+                        tooltip: 'Ungroup',
+                        onTap: controller.ungroupSelected,
                       ),
-                    const Spacer(),
                     if (controller.selectedNodeIds.isNotEmpty)
-                      IconButton(
-                        icon: const Icon(Icons.delete_outline, size: 17, color: StudioTheme.dangerCrimson),
-                        tooltip: 'Delete selected',
-                        onPressed: () => controller.deleteSelected(),
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                      _headerIconBtn(
+                        icon: Icons.delete_outline,
+                        tooltip: 'Delete Selected',
+                        color: StudioTheme.dangerCrimson,
+                        onTap: controller.deleteSelected,
                       ),
+                    _headerIconBtn(
+                      icon: Icons.add,
+                      tooltip: 'New Layer',
+                      color: StudioTheme.accentCyanBright,
+                      onTap: controller.addLayer,
+                    ),
                   ],
                 ),
               ),
-
               const Divider(color: StudioTheme.obsidianBorder, height: 1),
 
-              // Layers Reorderable List (Top of list = Front-most layer)
+              // Reorderable Layer Tree
               Expanded(
                 child: ReorderableListView.builder(
                   buildDefaultDragHandles: false,
                   itemCount: totalLayers,
                   onReorderItem: (oldVisualIdx, newVisualIdx) {
-                    // Translate visual top-down index back to document bottom-up index
                     final oldDocIdx = totalLayers - 1 - oldVisualIdx;
                     final newDocIdx = (totalLayers - 1 - newVisualIdx).clamp(0, totalLayers - 1);
                     controller.reorderLayerItem(oldDocIdx, newDocIdx);
@@ -109,177 +99,183 @@ class LayersPanel extends StatelessWidget {
     );
   }
 
+  Widget _headerIconBtn({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onTap,
+    Color color = StudioTheme.textSecondary,
+  }) {
+    return IconButton(
+      icon: Icon(icon, size: 15, color: color),
+      tooltip: tooltip,
+      onPressed: onTap,
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+    );
+  }
+
   Widget _buildLayerItem(BuildContext context, Node layer, int visualIndex) {
     final isSelected = controller.selectedNodeIds.contains(layer.id);
     final isActive = controller.activeLayerId == layer.id;
     final isGroup = layer is GroupNode;
-    // Display children top-down as well (front-most child first)
     final children = isGroup ? layer.children.reversed.toList() : const <Node>[];
 
     return Material(
       key: ValueKey(layer.id),
       color: isSelected ? StudioTheme.accentCyanSurface : StudioTheme.obsidianSurface,
-      child: Container(
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder, width: 0.5)),
-        ),
+      child: Theme(
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
           key: PageStorageKey(layer.id),
           initiallyExpanded: true,
-          tilePadding: const EdgeInsets.symmetric(horizontal: 6),
+          dense: true,
+          visualDensity: VisualDensity.compact,
+          tilePadding: const EdgeInsets.symmetric(horizontal: 8),
           childrenPadding: EdgeInsets.zero,
           leading: ReorderableDragStartListener(
             index: visualIndex,
-            child: const Icon(Icons.drag_indicator, size: 16, color: StudioTheme.textMuted),
+            child: const Icon(Icons.drag_indicator, size: 14, color: StudioTheme.textMuted),
           ),
           title: GestureDetector(
+            behavior: HitTestBehavior.opaque,
             onTap: () {
               controller.selectNode(layer.id, multi: controller.multiSelectMode);
               controller.setActiveLayer(layer.id);
             },
             onDoubleTap: () => _promptRename(context, layer),
             child: Row(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
-                  isGroup ? Icons.layers : Icons.brush,
-                  size: 15,
-                  color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
+                  isGroup ? Icons.folder_outlined : Icons.layers_outlined,
+                  size: 14,
+                  color: isActive ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 7),
                 Expanded(
                   child: Text(
                     layer.name.isNotEmpty ? layer.name : layer.typeName,
                     style: TextStyle(
-                      color: isSelected ? StudioTheme.textPrimary : StudioTheme.textSecondary,
+                      color: isSelected || isActive ? StudioTheme.textPrimary : StudioTheme.textSecondary,
                       fontSize: 12,
-                      fontWeight: isSelected || isActive ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isSelected || isActive ? FontWeight.w600 : FontWeight.w500,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                // Shining Offset Color (Electric Amber-Gold) for the Active Target Layer Badge!
-                if (isActive)
-                  Container(
-                    margin: const EdgeInsets.only(left: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: StudioTheme.accentAmber,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: const Text(
-                      'ACT',
-                      style: TextStyle(
-                        color: StudioTheme.obsidianVoid,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: Icon(
-                  layer.visible ? Icons.visibility : Icons.visibility_off,
-                  size: 15,
-                  color: layer.visible ? StudioTheme.textSecondary : StudioTheme.textMuted,
-                ),
-                tooltip: layer.visible ? 'Hide layer' : 'Show layer',
-                onPressed: () => controller.toggleVisibility(layer.id),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+              _headerIconBtn(
+                icon: layer.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                tooltip: layer.visible ? 'Hide' : 'Show',
+                color: layer.visible ? StudioTheme.textSecondary : StudioTheme.textMuted,
+                onTap: () => controller.toggleVisibility(layer.id),
               ),
-              IconButton(
-                icon: Icon(
-                  layer.locked ? Icons.lock : Icons.lock_open,
-                  size: 15,
-                  color: layer.locked ? StudioTheme.accentAmber : StudioTheme.textMuted,
-                ),
+              _headerIconBtn(
+                icon: layer.locked ? Icons.lock_outline : Icons.lock_open_outlined,
                 tooltip: layer.locked ? 'Unlock' : 'Lock',
-                onPressed: () => controller.toggleLock(layer.id),
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                color: layer.locked ? StudioTheme.accentAmber : StudioTheme.textMuted,
+                onTap: () => controller.toggleLock(layer.id),
               ),
             ],
           ),
-          children: children.map((c) => _buildChildNodeItem(context, c, indent: 24)).toList(),
+          children: children.map((c) => _buildChildNodeItem(context, c, indent: 26)).toList(),
         ),
       ),
     );
   }
 
-  Widget _buildChildNodeItem(BuildContext context, Node node, {double indent = 24}) {
+  Widget _buildChildNodeItem(BuildContext context, Node node, {double indent = 26}) {
     final isSelected = controller.selectedNodeIds.contains(node.id);
+    final hasAnimations = controller.document.animations.containsKey(node.id);
     final icon = switch (node) {
-      RectNode() => Icons.crop_square,
+      RectNode() => Icons.crop_square_rounded,
       EllipseNode() => Icons.circle_outlined,
-      PathNode() => Icons.gesture,
+      PathNode() => Icons.timeline,
       TextNode() => Icons.title,
-      GroupNode() => Icons.folder_open,
+      GroupNode() => Icons.folder_open_outlined,
     };
 
+    Color? swatchColor;
+    if (node is ShapeNode) {
+      final c = node.style.fill ?? node.style.stroke;
+      if (c != null) swatchColor = Color(c.value);
+    } else if (node is TextNode && node.fill != null) {
+      swatchColor = Color(node.fill!.value);
+    }
+
     return Material(
-      color: isSelected ? StudioTheme.accentCyanSurface : StudioTheme.obsidianVoid,
-      child: Container(
-        padding: EdgeInsets.only(left: indent, right: 6),
-        height: 34,
-        decoration: BoxDecoration(
-          border: Border(
-            left: BorderSide(
-              color: isSelected ? StudioTheme.accentAmber : Colors.transparent,
-              width: 3,
+      color: isSelected ? StudioTheme.accentCyanSurface : StudioTheme.obsidianSurface,
+      child: InkWell(
+        onTap: () => controller.selectNode(node.id, multi: controller.multiSelectMode),
+        onDoubleTap: () => _promptRename(context, node),
+        child: Container(
+          padding: EdgeInsets.only(left: indent, right: 8),
+          height: 32,
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                color: isSelected ? StudioTheme.accentCyanBright : Colors.transparent,
+                width: 2,
+              ),
             ),
           ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 14,
-              color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: GestureDetector(
-                onTap: () => controller.selectNode(node.id, multi: controller.multiSelectMode),
-                onDoubleTap: () => _promptRename(context, node),
+          child: Row(
+            children: [
+              // Clean Color Swatch Dot + Shape Icon
+              if (swatchColor != null) ...[
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: swatchColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ] else ...[
+                Icon(
+                  icon,
+                  size: 13,
+                  color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
+                ),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
                 child: Text(
                   node.name.isNotEmpty ? node.name : node.typeName,
                   style: TextStyle(
                     color: isSelected ? StudioTheme.textPrimary : StudioTheme.textSecondary,
                     fontSize: 12,
-                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.normal,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-            ),
-            IconButton(
-              icon: Icon(
-                node.visible ? Icons.visibility : Icons.visibility_off,
-                size: 14,
+              if (hasAnimations)
+                const Padding(
+                  padding: EdgeInsets.only(right: 6),
+                  child: Icon(Icons.diamond, size: 9, color: StudioTheme.accentAmber),
+                ),
+              _headerIconBtn(
+                icon: node.visible ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                tooltip: 'Visibility',
                 color: node.visible ? StudioTheme.textSecondary : StudioTheme.textMuted,
+                onTap: () => controller.toggleVisibility(node.id),
               ),
-              onPressed: () => controller.toggleVisibility(node.id),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-            ),
-            IconButton(
-              icon: Icon(
-                node.locked ? Icons.lock : Icons.lock_open,
-                size: 14,
+              _headerIconBtn(
+                icon: node.locked ? Icons.lock_outline : Icons.lock_open_outlined,
+                tooltip: 'Lock',
                 color: node.locked ? StudioTheme.accentAmber : StudioTheme.textMuted,
+                onTap: () => controller.toggleLock(node.id),
               ),
-              onPressed: () => controller.toggleLock(node.id),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -292,7 +288,7 @@ class LayersPanel extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: Text(
           'Rename ${node.typeName}',
-          style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.bold),
+          style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 15, fontWeight: FontWeight.w600),
         ),
         content: TextField(
           controller: textCtrl,
@@ -311,7 +307,7 @@ class LayersPanel extends StatelessWidget {
               controller.updateNode(node.id, (n) => n.withBase(name: textCtrl.text), label: 'Rename');
               Navigator.pop(context);
             },
-            child: const Text('Rename', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('Save', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
         ],
       ),

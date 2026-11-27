@@ -547,207 +547,122 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildHeroStudioDeck() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       decoration: const BoxDecoration(
         color: StudioTheme.obsidianSurface,
         border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              // Left Card: Interactive 6-Step Guided Animation Tutorial Lab!
-              Expanded(
-                flex: 5,
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: StudioTheme.obsidianElevated,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: StudioTheme.accentAmber, width: 1.5),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: StudioTheme.accentAmberSurface,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.school, color: StudioTheme.accentAmberBright, size: 24),
-                      ),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'INTERACTIVE ANIMATION LAB (6-STEP GUIDE)',
-                              style: TextStyle(
-                                color: StudioTheme.accentAmberBright,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Learn & test 60 FPS keyframing, Auto-Key, Onion Skinning & Lottie export step-by-step!',
-                              style: TextStyle(color: StudioTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: StudioTheme.accentAmber,
-                          foregroundColor: StudioTheme.obsidianVoid,
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
-                        ),
-                        icon: const Icon(Icons.play_arrow, size: 16),
-                        label: const Text('Start Lab', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
-                        onPressed: _startGuidedAnimationLab,
-                      ),
-                    ],
-                  ),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            // Interactive Guided Animation Lab Pill
+            InkWell(
+              onTap: _startGuidedAnimationLab,
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                decoration: BoxDecoration(
+                  color: StudioTheme.obsidianElevated,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: StudioTheme.accentAmber.withAlpha(140)),
                 ),
-              ),
-              const SizedBox(width: 14),
-              // Right Card: Replay Live Vector Intro Engine
-              Expanded(
-                flex: 3,
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: StudioTheme.obsidianElevated,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: StudioTheme.accentCyan),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: StudioTheme.accentCyanSurface,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.bolt, color: StudioTheme.accentCyanBright, size: 22),
-                      ),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'VECTOR INTRO ENGINE',
-                              style: TextStyle(
-                                color: StudioTheme.accentCyanBright,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                fontFamily: 'monospace',
-                              ),
-                            ),
-                            SizedBox(height: 3),
-                            Text(
-                              'Watch & scrub the live 120Hz vector choreography.',
-                              style: TextStyle(color: StudioTheme.textSecondary, fontSize: 11),
-                            ),
-                          ],
-                        ),
-                      ),
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: StudioTheme.accentCyanBright,
-                          side: const BorderSide(color: StudioTheme.accentCyan),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => IntroEngineScreen(database: _database),
-                            ),
-                          );
-                        },
-                        child: const Text('Launch', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          // Sample Animations Showcase Strip
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                const Text(
-                  'SAMPLE ANIMATIONS:',
-                  style: TextStyle(
-                    color: StudioTheme.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-                const SizedBox(width: 10),
-                for (final sample in SampleProjectsCatalog.templates)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 10),
-                    child: InkWell(
-                      onTap: () => _launchSampleTemplate(sample),
-                      borderRadius: BorderRadius.circular(6),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: StudioTheme.obsidianVoid,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: StudioTheme.obsidianBorderBright),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.play_circle_outline, size: 14, color: StudioTheme.accentAmberBright),
-                            const SizedBox(width: 6),
-                            Text(
-                              sample.title,
-                              style: const TextStyle(
-                                color: StudioTheme.textPrimary,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: StudioTheme.accentCyanSurface,
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: Text(
-                                sample.tag,
-                                style: const TextStyle(
-                                  color: StudioTheme.accentCyanBright,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w800,
-                                  fontFamily: 'monospace',
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.school_outlined, color: StudioTheme.accentAmberBright, size: 16),
+                    SizedBox(width: 8),
+                    Text(
+                      'Guided Animation Lab',
+                      style: TextStyle(
+                        color: StudioTheme.textPrimary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
-                  ),
-              ],
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward, color: StudioTheme.accentAmberBright, size: 14),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+            const SizedBox(width: 10),
+
+            // Replay Vector Intro Engine Pill
+            InkWell(
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => IntroEngineScreen(database: _database),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: StudioTheme.obsidianElevated,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: StudioTheme.obsidianBorderBright),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.play_circle_outline, color: StudioTheme.accentCyanBright, size: 16),
+                    SizedBox(width: 7),
+                    Text(
+                      'Intro Showcase',
+                      style: TextStyle(
+                        color: StudioTheme.textSecondary,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 14),
+            const SizedBox(
+              height: 22,
+              child: VerticalDivider(color: StudioTheme.obsidianBorder, width: 1),
+            ),
+            const SizedBox(width: 14),
+
+            // Sample Templates Strip
+            for (final sample in SampleProjectsCatalog.templates)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: InkWell(
+                  onTap: () => _launchSampleTemplate(sample),
+                  borderRadius: BorderRadius.circular(7),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: StudioTheme.obsidianVoid,
+                      borderRadius: BorderRadius.circular(7),
+                      border: Border.all(color: StudioTheme.obsidianBorder),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.animation, size: 13, color: StudioTheme.accentCyanBright),
+                        const SizedBox(width: 6),
+                        Text(
+                          sample.title,
+                          style: const TextStyle(
+                            color: StudioTheme.textSecondary,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -886,88 +801,35 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
 
-                    // Dimensions badge (Top Right)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: StudioTheme.obsidianSurface,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: StudioTheme.obsidianBorder),
-                        ),
-                        child: Text(
-                          '${docW.toInt()} × ${docH.toInt()}',
-                          style: const TextStyle(
-                            color: StudioTheme.textSecondary,
-                            fontSize: 10,
-                            fontFamily: 'monospace',
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ),
-
-                    // Animated 60 FPS badge (Top Left) when project has keyframe tracks
+                    // Subtle Animated Indicator Dot (Top Right)
                     if (previewDoc != null && previewDoc.animations.isNotEmpty)
                       Positioned(
-                        top: 8,
-                        left: 8,
+                        top: 10,
+                        right: 10,
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: StudioTheme.accentAmber,
+                            color: StudioTheme.obsidianSurface,
                             borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: StudioTheme.obsidianBorderBright),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.diamond, size: 9, color: StudioTheme.obsidianVoid),
-                              SizedBox(width: 3),
+                              Icon(Icons.diamond, size: 8, color: StudioTheme.accentAmber),
+                              SizedBox(width: 4),
                               Text(
-                                'ANIMATED',
+                                'Animated',
                                 style: TextStyle(
-                                  color: StudioTheme.obsidianVoid,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  fontFamily: 'monospace',
+                                  color: StudioTheme.textSecondary,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ],
                           ),
                         ),
                       ),
-
-                    // Element count badge (Bottom Left)
-                    Positioned(
-                      bottom: 8,
-                      left: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: elementCount > 0
-                              ? StudioTheme.accentCyanSurface
-                              : StudioTheme.obsidianSurface,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: elementCount > 0
-                                ? StudioTheme.accentCyan
-                                : StudioTheme.obsidianBorder,
-                          ),
-                        ),
-                        child: Text(
-                          '$elementCount elements',
-                          style: TextStyle(
-                            color: elementCount > 0
-                                ? StudioTheme.accentCyanBright
-                                : StudioTheme.textSecondary,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -990,14 +852,14 @@ class _HomeScreenState extends State<HomeScreen> {
                           style: const TextStyle(
                             color: StudioTheme.textPrimary,
                             fontSize: 13,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w600,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          updatedStr,
+                          '${docW.toInt()}×${docH.toInt()}  •  $updatedStr',
                           style: const TextStyle(color: StudioTheme.textMuted, fontSize: 11),
                         ),
                       ],

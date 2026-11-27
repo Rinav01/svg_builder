@@ -95,13 +95,6 @@ class _CanvasViewState extends State<CanvasView> {
     return Vec2(docX, docY);
   }
 
-  Offset _docToScreen(Vec2 docPt) {
-    return Offset(
-      docPt.x * _viewportScale + _viewportOffset.dx,
-      docPt.y * _viewportScale + _viewportOffset.dy,
-    );
-  }
-
   void _onPointerDown(PointerDownEvent event) {
     final isStylus = event.kind == PointerDeviceKind.stylus ||
         event.kind == PointerDeviceKind.invertedStylus;
@@ -404,11 +397,12 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   void _handleNodeEditDown(Vec2 docPoint) {
+    final evalDoc = widget.controller.renderedDocument;
     for (final id in widget.controller.selectedNodeIds) {
-      final node = widget.controller.document.findById(id);
+      final node = evalDoc.findById(id);
       if (node is! PathNode) continue;
 
-      final ancestry = widget.controller.document.ancestry(id);
+      final ancestry = evalDoc.ancestry(id);
       final fullMatrix = concatTransforms(ancestry);
       if (!fullMatrix.isInvertible) continue;
 
@@ -431,7 +425,8 @@ class _CanvasViewState extends State<CanvasView> {
     final activeId = widget.controller.activeNodeEditId;
     if (activeId == null) return;
 
-    final ancestry = widget.controller.document.ancestry(activeId);
+    final evalDoc = widget.controller.renderedDocument;
+    final ancestry = evalDoc.ancestry(activeId);
     final fullMatrix = concatTransforms(ancestry);
     if (!fullMatrix.isInvertible) return;
 
@@ -440,12 +435,14 @@ class _CanvasViewState extends State<CanvasView> {
   }
 
   void _handleSelectionDown(Vec2 docPoint) {
-    // 1. Check if we hit any handle (Scale / Rotate) of an already selected node
+    final evalDoc = widget.controller.renderedDocument;
+
+    // 1. Check if we hit any handle (Scale / Rotate) of an already selected node in evaluated space
     for (final id in widget.controller.selectedNodeIds) {
-      final node = widget.controller.document.findById(id);
+      final node = evalDoc.findById(id);
       if (node == null) continue;
 
-      final ancestry = widget.controller.document.ancestry(id);
+      final ancestry = evalDoc.ancestry(id);
       final fullMatrix = concatTransforms(ancestry);
       if (!fullMatrix.isInvertible) continue;
 
@@ -463,18 +460,15 @@ class _CanvasViewState extends State<CanvasView> {
       }
     }
 
-    // 2. Check if we clicked inside an already-selected shape (for translation drag)
+    // 2. Check if we clicked inside an already-selected shape (or its expanded bounding box)
     for (final id in widget.controller.selectedNodeIds) {
-      final node = widget.controller.document.findById(id);
+      final node = evalDoc.findById(id);
       if (node != null) {
-        final ancestry = widget.controller.document.ancestry(id);
+        final ancestry = evalDoc.ancestry(id);
         final fullMatrix = concatTransforms(ancestry);
         if (!fullMatrix.isInvertible) continue;
         final localPoint = fullMatrix.inverted().apply(docPoint);
-        final hit = node is ShapeNode
-            ? (node.toPath().containsPoint(localPoint) ||
-                node.toPath().hitTestStroke(localPoint, 8.0 / _viewportScale))
-            : node.localBounds.containsPoint(localPoint);
+        final hit = node.localBounds.inflate(8.0 / _viewportScale).containsPoint(localPoint);
 
         if (hit) {
           _isTransformingNode = true;
@@ -484,10 +478,10 @@ class _CanvasViewState extends State<CanvasView> {
       }
     }
 
-    // 3. Otherwise hit-test top-most shape in document
-    final hit = widget.controller.document.hitTest(
+    // 3. Otherwise hit-test top-most shape in the evaluated renderedDocument!
+    final hit = evalDoc.hitTest(
       docPoint,
-      strokeTolerance: 6.0 / _viewportScale,
+      strokeTolerance: 10.0 / _viewportScale,
     );
 
     if (hit != null) {
@@ -600,43 +594,13 @@ class _CanvasViewState extends State<CanvasView> {
     );
   }
 
-  /// Computes the top-center screen-space coordinate above the current selection
-  /// to anchor the Dynamic Contextual Floating Action Bar.
-  Offset? _computeFloatingToolbarOffset(Size viewSize) {
-    if (widget.controller.selectedNodeIds.isEmpty || _isTransformingNode) return null;
-
-    var unionScreen = Rect.zero;
-    var first = true;
-
-    for (final id in widget.controller.selectedNodeIds) {
-      final node = widget.controller.renderedDocument.findById(id);
-      if (node == null) continue;
-      final b = node.localBounds;
-      if (b.isEmpty) continue;
-      final fullMatrix = concatTransforms(widget.controller.renderedDocument.ancestry(id));
-      for (final corner in b.corners) {
-        final s = _docToScreen(fullMatrix.apply(corner));
-        final r = Rect.fromPoints(s, s);
-        unionScreen = first ? r : unionScreen.expandToInclude(r);
-        first = false;
-      }
-    }
-
-    if (first) return null;
-    final targetX = unionScreen.center.dx.clamp(140.0, math.max(140.0, viewSize.width - 140.0)).toDouble();
-    final targetY = ((unionScreen.top - 56.0) > 12.0
-            ? (unionScreen.top - 50.0)
-            : (unionScreen.bottom + 28.0).clamp(12.0, math.max(12.0, viewSize.height - 60.0)))
-        .toDouble();
-    return Offset(targetX, targetY);
-  }
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: Listenable.merge([
         widget.controller,
         widget.controller.playheadNotifier,
+        widget.controller.canvasRepaintNotifier,
       ]),
       builder: (context, _) {
         final renderedDoc = widget.controller.renderedDocument;
@@ -644,9 +608,6 @@ class _CanvasViewState extends State<CanvasView> {
 
         return LayoutBuilder(
           builder: (context, constraints) {
-            final viewSize = Size(constraints.maxWidth, constraints.maxHeight);
-            final floatingPos = _computeFloatingToolbarOffset(viewSize);
-
             return Listener(
               onPointerDown: _onPointerDown,
               onPointerMove: _onPointerMove,
@@ -659,54 +620,62 @@ class _CanvasViewState extends State<CanvasView> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    // 1. Zoomed & Panned Document Scene Graph + Live Freehand Stroke
-                    Transform(
-                      transform: Matrix4.identity()
-                        ..translateByDouble(_viewportOffset.dx, _viewportOffset.dy, 0.0, 1.0)
-                        ..scaleByDouble(_viewportScale, _viewportScale, 1.0, 1.0),
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          CustomPaint(
-                            painter: DocumentPainter(
-                              document: renderedDoc,
-                              selectedNodeIds: widget.controller.selectedNodeIds,
-                              isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
-                              peerPresences: widget.controller.peerPresences,
-                              clipToArtboard: widget.controller.clipToArtboard,
-                              showArtboardFrame: true,
-                              drawSelectionHandles: false, // Delegated to Screen-Space SelectionOverlayPainter!
-                              onionPrevDocument: onion.prev,
-                              onionNextDocument: onion.next,
+                    // 1. Zoomed & Panned Document Scene Graph + Live Freehand Stroke (Isolated RepaintBoundary)
+                    RepaintBoundary(
+                      child: Transform(
+                        transform: Matrix4.identity()
+                          ..translateByDouble(_viewportOffset.dx, _viewportOffset.dy, 0.0, 1.0)
+                          ..scaleByDouble(_viewportScale, _viewportScale, 1.0, 1.0),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            CustomPaint(
+                              painter: DocumentPainter(
+                                document: renderedDoc,
+                                selectedNodeIds: widget.controller.selectedNodeIds,
+                                isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
+                                peerPresences: widget.controller.peerPresences,
+                                clipToArtboard: widget.controller.clipToArtboard,
+                                showArtboardFrame: true,
+                                showGrid: widget.controller.showGrid,
+                                documentTitle: widget.controller.documentName,
+                                drawSelectionHandles: false,
+                                onionPrevDocument: onion.prev,
+                                onionNextDocument: onion.next,
+                              ),
                             ),
-                          ),
-                          ValueListenableBuilder<List<StrokeSample>>(
-                            valueListenable: widget.controller.activeStrokeNotifier,
-                            builder: (context, strokeSamples, _) {
-                              if (strokeSamples.isEmpty) return const SizedBox.shrink();
-                              return CustomPaint(
-                                painter: ActiveStrokePainter(
-                                  samples: strokeSamples,
-                                  strokeColor: Color(widget.controller.primaryColor.value),
-                                  size: widget.controller.brushSize,
-                                ),
-                              );
-                            },
-                          ),
-                        ],
+                            ValueListenableBuilder<List<StrokeSample>>(
+                              valueListenable: widget.controller.activeStrokeNotifier,
+                              builder: (context, strokeSamples, _) {
+                                if (strokeSamples.isEmpty) return const SizedBox.shrink();
+                                return RepaintBoundary(
+                                  child: CustomPaint(
+                                    painter: ActiveStrokePainter(
+                                      samples: strokeSamples,
+                                      strokeColor: Color(widget.controller.primaryColor.value),
+                                      size: widget.controller.brushSize,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ],
+                        ),
                       ),
                     ),
 
-                    // 2. Screen-Space Selection Handles, Smart Guides & Marquee Box
-                    CustomPaint(
-                      painter: SelectionOverlayPainter(
-                        document: renderedDoc,
-                        selectedNodeIds: widget.controller.selectedNodeIds,
-                        isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
-                        viewportOffset: _viewportOffset,
-                        viewportScale: _viewportScale,
-                        smartGuides: widget.controller.activeSmartGuides,
-                        marqueeBounds: widget.controller.marqueeBounds,
+                    // 2. Screen-Space Selection Handles, Diamond Anchors, Rotation Pill & Smart Guides
+                    RepaintBoundary(
+                      child: CustomPaint(
+                        painter: SelectionOverlayPainter(
+                          document: renderedDoc,
+                          selectedNodeIds: widget.controller.selectedNodeIds,
+                          isNodeEditMode: widget.controller.currentTool == EditorTool.nodeEdit,
+                          viewportOffset: _viewportOffset,
+                          viewportScale: _viewportScale,
+                          smartGuides: widget.controller.activeSmartGuides,
+                          marqueeBounds: widget.controller.marqueeBounds,
+                        ),
                       ),
                     ),
 
@@ -734,19 +703,19 @@ class _CanvasViewState extends State<CanvasView> {
                         ),
                       ),
 
-                    // 5. Dynamic Contextual Floating Selection Action Pill
-                    if (floatingPos != null)
+                    // 5. Docked Bottom-Center Contextual Selection Action Pill (`1 SEL | + Key Pose | Dup | ...`)
+                    if (widget.controller.selectedNodeIds.isNotEmpty && !_isTransformingNode)
                       Positioned(
-                        left: floatingPos.dx - 115,
-                        top: floatingPos.dy,
+                        left: 14,
+                        bottom: 12,
                         child: _buildFloatingContextualBar(),
                       ),
 
-                    // 6. Floating Zoom, Multi-Select & Artboard Framing HUD Pill (Bottom Left)
+                    // 6. Floating Zoom, Fit & 1:1 Viewport HUD Pill (Bottom-Right, matches Reference Image 2)
                     Positioned(
-                      left: 12,
+                      right: 14,
                       bottom: 12,
-                      child: _buildBottomLeftHudPill(),
+                      child: _buildBottomRightHudPill(),
                     ),
                   ],
                 ),
@@ -768,27 +737,57 @@ class _CanvasViewState extends State<CanvasView> {
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 6),
       decoration: BoxDecoration(
-        color: StudioTheme.obsidianElevated,
+        color: StudioTheme.obsidianSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: StudioTheme.accentCyan, width: 1.2),
+        border: Border.all(color: StudioTheme.obsidianBorderBright),
         boxShadow: const [
-          BoxShadow(color: Colors.black54, blurRadius: 8, offset: Offset(0, 3)),
+          BoxShadow(color: Colors.black45, blurRadius: 8, offset: Offset(0, 3)),
         ],
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Clean Key Pose Action
+          InkWell(
+            onTap: () => widget.controller.keyCurrentPoseForSelected(),
+            borderRadius: BorderRadius.circular(5),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: const [
+                  Icon(Icons.diamond, size: 11, color: StudioTheme.accentAmber),
+                  SizedBox(width: 5),
+                  Text(
+                    'Key Pose',
+                    style: TextStyle(
+                      color: StudioTheme.textPrimary,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 8, indent: 7, endIndent: 7),
           _contextIconBtn(
             icon: Icons.copy,
             tooltip: 'Duplicate',
-            color: StudioTheme.textPrimary,
+            color: StudioTheme.textSecondary,
             onTap: widget.controller.duplicateSelected,
           ),
           _contextIconBtn(
-            icon: Icons.flip_to_front,
+            icon: Icons.arrow_upward,
             tooltip: 'Bring Forward',
-            color: StudioTheme.textPrimary,
+            color: StudioTheme.textSecondary,
             onTap: widget.controller.bringForward,
+          ),
+          _contextIconBtn(
+            icon: Icons.arrow_downward,
+            tooltip: 'Send Backward',
+            color: StudioTheme.textSecondary,
+            onTap: widget.controller.sendBackward,
           ),
           if (isMulti)
             _contextIconBtn(
@@ -801,34 +800,12 @@ class _CanvasViewState extends State<CanvasView> {
             _contextIconBtn(
               icon: Icons.folder_open_outlined,
               tooltip: 'Ungroup',
-              color: StudioTheme.accentAmber,
+              color: StudioTheme.accentAmberBright,
               onTap: widget.controller.ungroupSelected,
             ),
           _contextIconBtn(
-            icon: Icons.diamond_outlined,
-            tooltip: 'Key Position at Current Time',
-            color: StudioTheme.accentAmberBright,
-            onTap: () {
-              for (final node in widget.controller.selectedNodes) {
-                widget.controller.setKeyframe(
-                  node.id,
-                  AnimProperty.x,
-                  widget.controller.currentTime,
-                  node.transform.x,
-                );
-                widget.controller.setKeyframe(
-                  node.id,
-                  AnimProperty.y,
-                  widget.controller.currentTime,
-                  node.transform.y,
-                );
-              }
-            },
-          ),
-          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 8, indent: 6, endIndent: 6),
-          _contextIconBtn(
             icon: Icons.delete_outline,
-            tooltip: 'Delete Selected',
+            tooltip: 'Delete',
             color: StudioTheme.dangerCrimson,
             onTap: widget.controller.deleteSelected,
           ),
@@ -847,18 +824,21 @@ class _CanvasViewState extends State<CanvasView> {
       icon: Icon(icon, size: 16, color: color),
       tooltip: tooltip,
       padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
+      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
       onPressed: onTap,
     );
   }
 
-  Widget _buildBottomLeftHudPill() {
+  Widget _buildBottomRightHudPill() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: StudioTheme.obsidianSurface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: StudioTheme.obsidianBorder),
+        border: Border.all(color: StudioTheme.obsidianBorderBright),
         boxShadow: const [
           BoxShadow(color: Colors.black45, blurRadius: 6, offset: Offset(0, 2)),
         ],
@@ -866,10 +846,67 @@ class _CanvasViewState extends State<CanvasView> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Zoom Percentage Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: StudioTheme.accentCyanSurface,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${(_viewportScale * 100).round()}%',
+              style: const TextStyle(
+                color: StudioTheme.accentCyanBright,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                fontFamily: 'monospace',
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: _fitToScreen,
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Text(
+                'FIT',
+                style: TextStyle(
+                  color: StudioTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          InkWell(
+            onTap: () {
+              setState(() {
+                _viewportScale = 1.0;
+              });
+            },
+            borderRadius: BorderRadius.circular(4),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              child: Text(
+                '1:1',
+                style: TextStyle(
+                  color: StudioTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ),
+          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 10, indent: 5, endIndent: 5),
           IconButton(
-            icon: const Icon(Icons.remove, size: 15, color: StudioTheme.textSecondary),
+            icon: const Icon(Icons.remove, size: 15, color: StudioTheme.textPrimary),
             tooltip: 'Zoom Out',
             padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
             constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: () {
               setState(() {
@@ -877,22 +914,12 @@ class _CanvasViewState extends State<CanvasView> {
               });
             },
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: Text(
-              '${(_viewportScale * 100).round()}%',
-              style: const TextStyle(
-                color: StudioTheme.textPrimary,
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
           IconButton(
-            icon: const Icon(Icons.add, size: 15, color: StudioTheme.textSecondary),
+            icon: const Icon(Icons.add, size: 15, color: StudioTheme.textPrimary),
             tooltip: 'Zoom In',
             padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            style: IconButton.styleFrom(tapTargetSize: MaterialTapTargetSize.shrinkWrap),
             constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
             onPressed: () {
               setState(() {
@@ -900,28 +927,7 @@ class _CanvasViewState extends State<CanvasView> {
               });
             },
           ),
-          const SizedBox(width: 2),
-          IconButton(
-            icon: const Icon(Icons.fit_screen, size: 15, color: StudioTheme.accentCyanBright),
-            tooltip: 'Fit to Screen',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-            onPressed: _fitToScreen,
-          ),
-          IconButton(
-            icon: Icon(
-              widget.controller.clipToArtboard ? Icons.crop : Icons.crop_free,
-              size: 15,
-              color: widget.controller.clipToArtboard ? StudioTheme.accentAmber : StudioTheme.textSecondary,
-            ),
-            tooltip: widget.controller.clipToArtboard
-                ? 'Clipping to Artboard: ON'
-                : 'Clipping to Artboard: OFF',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-            onPressed: widget.controller.toggleClipToArtboard,
-          ),
-          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 10),
+          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 10, indent: 5, endIndent: 5),
           // Touch Multi-Select Mode Toggle
           InkWell(
             onTap: widget.controller.toggleMultiSelectMode,
@@ -934,29 +940,16 @@ class _CanvasViewState extends State<CanvasView> {
                     : StudioTheme.obsidianElevated,
                 borderRadius: BorderRadius.circular(4),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.library_add_check_outlined,
-                    size: 12,
-                    color: widget.controller.multiSelectMode
-                        ? StudioTheme.obsidianVoid
-                        : StudioTheme.textSecondary,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    'MULTI',
-                    style: TextStyle(
-                      color: widget.controller.multiSelectMode
-                          ? StudioTheme.obsidianVoid
-                          : StudioTheme.textSecondary,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.4,
-                    ),
-                  ),
-                ],
+              child: Text(
+                'MULTI',
+                style: TextStyle(
+                  color: widget.controller.multiSelectMode
+                      ? StudioTheme.obsidianVoid
+                      : StudioTheme.textSecondary,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
           ),

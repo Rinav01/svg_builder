@@ -536,18 +536,21 @@ class _EditorScreenState extends State<EditorScreen>
             child: Scaffold(
               backgroundColor: StudioTheme.obsidianVoid,
               appBar: AppBar(
+                toolbarHeight: 46,
+                leadingWidth: 44,
                 leading: IconButton(
-                  icon: const Icon(Icons.arrow_back, size: 20),
-                  tooltip: 'Back to Drawings',
+                  icon: const Icon(Icons.arrow_back_ios_new, size: 16),
+                  tooltip: 'Back to Projects',
                   onPressed: _handleBack,
                 ),
+                titleSpacing: 0,
                 title: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Flexible(
                       child: InkWell(
                         onTap: _promptRenameDocument,
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(5),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           child: Row(
@@ -557,59 +560,56 @@ class _EditorScreenState extends State<EditorScreen>
                                 child: Text(
                                   _controller.documentName,
                                   style: const TextStyle(
-                                    fontSize: 15,
-                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
                                     color: StudioTheme.textPrimary,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              const SizedBox(width: 5),
-                              const Icon(Icons.edit, size: 12, color: StudioTheme.accentCyanBright),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Live Isolate Auto-Save Status Pill
-                    ValueListenableBuilder<AutoSaveStatus>(
-                      valueListenable: _autoSaveService.statusNotifier,
-                      builder: (context, status, _) {
-                        if (status == AutoSaveStatus.idle) return const SizedBox.shrink();
-                        final (label, color) = switch (status) {
-                          AutoSaveStatus.saving => ('SAVING', StudioTheme.accentAmber),
-                          AutoSaveStatus.saved => ('SAVED', StudioTheme.accentCyanBright),
-                          AutoSaveStatus.error => ('SAVE ERR', StudioTheme.dangerCrimson),
-                          AutoSaveStatus.idle => ('', StudioTheme.textMuted),
-                        };
-                        return Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: StudioTheme.obsidianElevated,
-                            borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: color.withValues(alpha: 0.6)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 5,
-                                height: 5,
-                                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                              ),
-                              const SizedBox(width: 4),
+                              const SizedBox(width: 6),
                               Text(
-                                label,
-                                style: TextStyle(
-                                  color: color,
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
+                                '${_controller.document.width.toInt()}×${_controller.document.height.toInt()}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: StudioTheme.textMuted,
                                   fontFamily: 'monospace',
                                 ),
                               ),
                             ],
                           ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Subtle Auto-Save Status Dot
+                    ValueListenableBuilder<AutoSaveStatus>(
+                      valueListenable: _autoSaveService.statusNotifier,
+                      builder: (context, status, _) {
+                        if (status == AutoSaveStatus.idle) return const SizedBox.shrink();
+                        final (label, color) = switch (status) {
+                          AutoSaveStatus.saving => ('Saving...', StudioTheme.accentAmber),
+                          AutoSaveStatus.saved => ('Saved', StudioTheme.successEmerald),
+                          AutoSaveStatus.error => ('Error', StudioTheme.dangerCrimson),
+                          AutoSaveStatus.idle => ('', StudioTheme.textMuted),
+                        };
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              label,
+                              style: const TextStyle(
+                                color: StudioTheme.textMuted,
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         );
                       },
                     ),
@@ -619,13 +619,36 @@ class _EditorScreenState extends State<EditorScreen>
                 foregroundColor: StudioTheme.textPrimary,
                 shape: const Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
                 actions: [
-                  // Guided Animation Lab Toggle Pill in Shining Electric Amber-Gold!
+                  // Undo / Redo Cluster
+                  ListenableBuilder(
+                    listenable: _controller,
+                    builder: (context, _) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.undo, size: 18),
+                          tooltip: 'Undo (Ctrl+Z / 2-finger tap)',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _controller.canUndo ? _controller.undo : null,
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.redo, size: 18),
+                          tooltip: 'Redo (Ctrl+Y / 3-finger tap)',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: _controller.canRedo ? _controller.redo : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const VerticalDivider(color: StudioTheme.obsidianBorder, width: 14, indent: 12, endIndent: 12),
+
+                  // Guided Lab Toggle (Subtle Pill)
                   ListenableBuilder(
                     listenable: _tutorialController,
                     builder: (context, _) {
                       final active = _tutorialController.isActive;
                       return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
                         child: InkWell(
                           onTap: () {
                             if (active) {
@@ -638,32 +661,27 @@ class _EditorScreenState extends State<EditorScreen>
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: active
-                                  ? StudioTheme.accentAmber
-                                  : StudioTheme.accentAmberSurface,
+                              color: active ? StudioTheme.accentAmberSurface : StudioTheme.obsidianElevated,
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: StudioTheme.accentAmber),
+                              border: Border.all(
+                                color: active ? StudioTheme.accentAmber : StudioTheme.obsidianBorder,
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(
-                                  Icons.school,
+                                  Icons.school_outlined,
                                   size: 14,
-                                  color: active
-                                      ? StudioTheme.obsidianVoid
-                                      : StudioTheme.accentAmberBright,
+                                  color: active ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
                                 ),
                                 const SizedBox(width: 5),
                                 Text(
-                                  active ? 'LAB GUIDE: ON' : 'ANIMATION GUIDE',
+                                  active ? 'Guide Active' : 'Guide',
                                   style: TextStyle(
-                                    color: active
-                                        ? StudioTheme.obsidianVoid
-                                        : StudioTheme.accentAmberBright,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w900,
-                                    fontFamily: 'monospace',
+                                    color: active ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
@@ -673,185 +691,155 @@ class _EditorScreenState extends State<EditorScreen>
                       );
                     },
                   ),
-                  ListenableBuilder(
-                    listenable: _controller,
-                    builder: (context, _) => Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.undo, size: 20),
-                          tooltip: 'Undo (2-finger tap)',
-                          onPressed: _controller.canUndo ? _controller.undo : null,
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.redo, size: 20),
-                          tooltip: 'Redo (3-finger tap)',
-                          onPressed: _controller.canRedo ? _controller.redo : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Prominent Cyan `⚡ Export Lottie` Pill Button (Matches Inspiration Mockup)
+
+                  // Unified Primary Export Menu Button (Clean Amber Fill)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-                    child: InkWell(
-                      onTap: _exportLottie,
-                      borderRadius: BorderRadius.circular(7),
+                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+                    child: PopupMenuButton<String>(
+                      tooltip: 'Export & Share',
+                      onSelected: (val) {
+                        switch (val) {
+                          case 'lottie_file':
+                            _exportLottie();
+                          case 'svg_file':
+                            _exportSvg();
+                          case 'png_file':
+                            _exportPng();
+                          case 'share':
+                            _shareDocument();
+                          case 'save_project':
+                            _saveProject();
+                          case 'open_file':
+                            _openFile();
+                          case 'svg_code':
+                            _showExportDialog();
+                          case 'gestures_guide':
+                            OnboardingGuideDialog.show(context);
+                        }
+                      },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                         decoration: BoxDecoration(
-                          color: StudioTheme.accentCyanBright,
-                          borderRadius: BorderRadius.circular(7),
+                          color: StudioTheme.accentAmber,
+                          borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.bolt, size: 15, color: StudioTheme.obsidianVoid),
-                            SizedBox(width: 4),
                             Text(
-                              'Export Lottie',
+                              'Export',
                               style: TextStyle(
                                 color: StudioTheme.obsidianVoid,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w900,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
+                            SizedBox(width: 3),
+                            Icon(Icons.keyboard_arrow_down, size: 15, color: StudioTheme.obsidianVoid),
                           ],
                         ),
                       ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.save_outlined, size: 20),
-                    tooltip: 'Save Project (.svgb)',
-                    onPressed: _saveProject,
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.share_outlined, size: 20, color: StudioTheme.accentCyanBright),
-                    tooltip: 'Share Drawing',
-                    onPressed: _shareDocument,
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: 'Export Options',
-                    icon: const Icon(Icons.file_download_outlined, color: StudioTheme.accentAmber),
-                    onSelected: (val) {
-                      if (val == 'svg_file') {
-                        _exportSvg();
-                      } else if (val == 'png_file') {
-                        _exportPng();
-                      } else if (val == 'lottie_file') {
-                        _exportLottie();
-                      } else if (val == 'svg_code') {
-                        _showExportDialog();
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'svg_file',
-                        child: Row(
-                          children: [
-                            Icon(Icons.image_outlined, size: 18, color: StudioTheme.accentCyanBright),
-                            SizedBox(width: 8),
-                            Text('Export SVG file'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'png_file',
-                        child: Row(
-                          children: [
-                            Icon(Icons.photo_outlined, size: 18, color: StudioTheme.accentCyanBright),
-                            SizedBox(width: 8),
-                            Text('Export PNG image...'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'lottie_file',
-                        child: Row(
-                          children: [
-                            Icon(Icons.animation, size: 18, color: StudioTheme.accentAmber),
-                            SizedBox(width: 8),
-                            Text('Export Lottie JSON'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'svg_code',
-                        child: Row(
-                          children: [
-                            Icon(Icons.code, size: 18, color: StudioTheme.textSecondary),
-                            SizedBox(width: 8),
-                            Text('View SVG code'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  PopupMenuButton<String>(
-                    tooltip: 'More Options',
-                    icon: const Icon(Icons.more_vert, size: 20),
-                    onSelected: (val) {
-                      if (val == 'open_file') {
-                        _openFile();
-                      } else if (val == 'guide') {
-                        OnboardingGuideDialog.show(context);
-                      }
-                    },
-                    itemBuilder: (context) => [
-                      const PopupMenuItem(
-                        value: 'open_file',
-                        child: Row(
-                          children: [
-                            Icon(Icons.folder_open, size: 18),
-                            SizedBox(width: 8),
-                            Text('Open File...'),
-                          ],
-                        ),
-                      ),
-                      const PopupMenuItem(
-                        value: 'guide',
-                        child: Row(
-                          children: [
-                            Icon(Icons.help_outline, size: 18, color: StudioTheme.accentCyanBright),
-                            SizedBox(width: 8),
-                            Text('Tablet Gestures Guide'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (FeatureFlags.enableCollaboration)
-                    IconButton(
-                      icon: const Icon(Icons.people_outline),
-                      tooltip: 'Live Collaboration Session',
-                      onPressed: () {
-                        final cs = _collabService;
-                        if (cs == null) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              cs.isConnected
-                                  ? 'Collaborating online with ${_controller.peerPresences.length} peers'
-                                  : 'Offline-ready CRDT session active (ID: ${cs.clientId})',
-                            ),
+                      itemBuilder: (context) => [
+                        const PopupMenuItem(
+                          value: 'lottie_file',
+                          child: Row(
+                            children: [
+                              Icon(Icons.animation, size: 16, color: StudioTheme.accentAmberBright),
+                              SizedBox(width: 10),
+                              Text('Export Lottie (.json)', style: TextStyle(fontSize: 12.5)),
+                            ],
                           ),
-                        );
-                      },
+                        ),
+                        const PopupMenuItem(
+                          value: 'svg_file',
+                          child: Row(
+                            children: [
+                              Icon(Icons.code, size: 16, color: StudioTheme.accentCyanBright),
+                              SizedBox(width: 10),
+                              Text('Export Vector SVG (.svg)', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'png_file',
+                          child: Row(
+                            children: [
+                              Icon(Icons.image_outlined, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Export PNG (1x / 2x / 4x)...', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuDivider(),
+                        const PopupMenuItem(
+                          value: 'share',
+                          child: Row(
+                            children: [
+                              Icon(Icons.ios_share, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Share Drawing...', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'save_project',
+                          child: Row(
+                            children: [
+                              Icon(Icons.save_outlined, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Save Project (.svgb)', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'open_file',
+                          child: Row(
+                            children: [
+                              Icon(Icons.folder_open, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Open File...', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'svg_code',
+                          child: Row(
+                            children: [
+                              Icon(Icons.data_object, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Inspect SVG Code', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                        const PopupMenuItem(
+                          value: 'gestures_guide',
+                          child: Row(
+                            children: [
+                              Icon(Icons.help_outline, size: 16, color: StudioTheme.textSecondary),
+                              SizedBox(width: 10),
+                              Text('Studio Shortcuts & Gestures', style: TextStyle(fontSize: 12.5)),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
+                  ),
+
                   IconButton(
                     icon: Icon(
                       Icons.view_sidebar_outlined,
+                      size: 18,
                       color: _showSidebar ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
                     ),
-                    tooltip: 'Toggle Sidebar (Layers & Properties)',
+                    tooltip: 'Toggle Inspector',
+                    visualDensity: VisualDensity.compact,
                     onPressed: () {
                       setState(() {
                         _showSidebar = !_showSidebar;
                       });
                     },
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                 ],
               ),
               body: LayoutBuilder(
@@ -957,31 +945,31 @@ class _EditorScreenState extends State<EditorScreen>
       listenable: _controller,
       builder: (context, _) {
         return Container(
-          height: 54,
+          height: 46,
           decoration: const BoxDecoration(
             color: StudioTheme.obsidianSurface,
             border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
           ),
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             child: Row(
               children: [
-                _horizontalToolTile(Icons.near_me_outlined, 'SELECT (V)', EditorTool.select),
-                _horizontalToolTile(Icons.gesture, 'NODES (A)', EditorTool.nodeEdit),
-                _horizontalToolTile(Icons.edit_outlined, 'S-PEN (P)', EditorTool.pen),
-                _horizontalToolTile(Icons.auto_fix_normal_outlined, 'ERASER (E)', EditorTool.eraser),
-                _horizontalToolTile(Icons.crop_square, 'RECT (R)', EditorTool.rectangle),
-                _horizontalToolTile(Icons.circle_outlined, 'OVAL (O)', EditorTool.ellipse),
-                _horizontalToolTile(Icons.title, 'TEXT (T)', EditorTool.text),
+                _horizontalToolTile(Icons.near_me_outlined, 'Select', EditorTool.select),
+                _horizontalToolTile(Icons.timeline, 'Nodes', EditorTool.nodeEdit),
+                _horizontalToolTile(Icons.edit_outlined, 'Pen', EditorTool.pen),
+                _horizontalToolTile(Icons.auto_fix_normal_outlined, 'Eraser', EditorTool.eraser),
+                _horizontalToolTile(Icons.crop_square_rounded, 'Rect', EditorTool.rectangle),
+                _horizontalToolTile(Icons.circle_outlined, 'Ellipse', EditorTool.ellipse),
+                _horizontalToolTile(Icons.title, 'Text', EditorTool.text),
                 const VerticalDivider(color: StudioTheme.obsidianBorder, width: 16, indent: 6, endIndent: 6),
                 IconButton(
                   icon: Icon(
-                    _controller.penOnlyMode ? Icons.draw : Icons.touch_app,
+                    _controller.penOnlyMode ? Icons.draw_outlined : Icons.touch_app_outlined,
                     color: _controller.penOnlyMode ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
-                    size: 18,
+                    size: 17,
                   ),
-                  tooltip: 'Toggle Pen-Only vs Touch Inking',
+                  tooltip: 'Stylus-Only vs Touch Inking',
                   onPressed: () {
                     setState(() {
                       _controller.penOnlyMode = !_controller.penOnlyMode;
@@ -999,48 +987,33 @@ class _EditorScreenState extends State<EditorScreen>
   Widget _horizontalToolTile(IconData icon, String label, EditorTool tool) {
     final isSelected = _controller.currentTool == tool;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: InkWell(
         onTap: () => _controller.currentTool = tool,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
             color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected ? StudioTheme.accentCyan : Colors.transparent,
-            ),
+            borderRadius: BorderRadius.circular(6),
           ),
-          child: Stack(
-            clipBehavior: Clip.none,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    icon,
-                    size: 16,
-                    color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textMuted,
-                      fontSize: 8,
-                      fontWeight: FontWeight.w900,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
+              Icon(
+                icon,
+                size: 15,
+                color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
               ),
-              if (isSelected)
-                const Positioned(
-                  top: -2,
-                  right: -4,
-                  child: Icon(Icons.circle, size: 6, color: StudioTheme.accentAmberBright),
+              const SizedBox(width: 5),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? StudioTheme.textPrimary : StudioTheme.textSecondary,
+                  fontSize: 11.5,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                 ),
+              ),
             ],
           ),
         ),
@@ -1053,136 +1026,121 @@ class _EditorScreenState extends State<EditorScreen>
       listenable: _controller,
       builder: (context, _) {
         return Container(
-          width: 74,
+          width: 52,
           decoration: const BoxDecoration(
             color: StudioTheme.obsidianSurface,
             border: Border(right: BorderSide(color: StudioTheme.obsidianBorder)),
           ),
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                const SizedBox(height: 8),
-                _toolButton(
-                  icon: Icons.near_me_outlined,
-                  label: 'SELECT',
-                  tool: EditorTool.select,
-                  tooltip: 'Select / Marquee Move (V)',
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              _toolButton(
+                icon: Icons.near_me_outlined,
+                tool: EditorTool.select,
+                tooltip: 'Select & Transform (V)',
+              ),
+              _toolButton(
+                icon: Icons.timeline,
+                tool: EditorTool.nodeEdit,
+                tooltip: 'Direct Node Edit (A)',
+              ),
+              _toolButton(
+                icon: Icons.edit_outlined,
+                tool: EditorTool.pen,
+                tooltip: 'Stylus Vector Pen (P)',
+              ),
+              _toolButton(
+                icon: Icons.auto_fix_normal_outlined,
+                tool: EditorTool.eraser,
+                tooltip: 'Vector Eraser (E)',
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Divider(color: StudioTheme.obsidianBorder, height: 1),
+              ),
+              _toolButton(
+                icon: Icons.crop_square_rounded,
+                tool: EditorTool.rectangle,
+                tooltip: 'Rectangle (R)',
+              ),
+              _toolButton(
+                icon: Icons.circle_outlined,
+                tool: EditorTool.ellipse,
+                tooltip: 'Ellipse (O)',
+              ),
+              _toolButton(
+                icon: Icons.title,
+                tool: EditorTool.text,
+                tooltip: 'Text (T)',
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Divider(color: StudioTheme.obsidianBorder, height: 1),
+              ),
+              // Pen-only vs Touch Inking toggle
+              IconButton(
+                icon: Icon(
+                  _controller.penOnlyMode ? Icons.draw_outlined : Icons.touch_app_outlined,
+                  color: _controller.penOnlyMode ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
+                  size: 17,
                 ),
-                _toolButton(
-                  icon: Icons.timeline,
-                  label: 'NODES',
-                  tool: EditorTool.nodeEdit,
-                  tooltip: 'Edit Nodes (Anchor & Control Points)',
-                ),
-                _toolButton(
-                  icon: Icons.edit_outlined,
-                  label: 'S-PEN',
-                  tool: EditorTool.pen,
-                  tooltip: 'Stylus Freehand Pen (P)',
-                ),
-                _toolButton(
-                  icon: Icons.auto_fix_normal_outlined,
-                  label: 'ERASER',
-                  tool: EditorTool.eraser,
-                  tooltip: 'Stroke Eraser (E)',
-                ),
-                _toolButton(
-                  icon: Icons.crop_square,
-                  label: 'RECT',
-                  tool: EditorTool.rectangle,
-                  tooltip: 'Rectangle (R)',
-                ),
-                _toolButton(
-                  icon: Icons.circle_outlined,
-                  label: 'OVAL',
-                  tool: EditorTool.ellipse,
-                  tooltip: 'Ellipse (O)',
-                ),
-                _toolButton(
-                  icon: Icons.title,
-                  label: 'TEXT',
-                  tool: EditorTool.text,
-                  tooltip: 'Text Label (T)',
-                ),
-                const SizedBox(height: 6),
-                // Pen-only vs Touch Inking toggle
-                IconButton(
-                  icon: Icon(
-                    _controller.penOnlyMode ? Icons.draw : Icons.touch_app,
-                    color: _controller.penOnlyMode ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
-                    size: 19,
-                  ),
-                  tooltip: _controller.penOnlyMode
-                      ? 'Pen-only Mode ON (Fingers navigate, stylus draws)'
-                      : 'Touch Inking Mode ON (Fingers can also draw)',
-                  onPressed: () {
+                tooltip: _controller.penOnlyMode
+                    ? 'Stylus Mode: Fingers Pan/Zoom, Stylus Draws'
+                    : 'Touch Mode: Fingers Also Draw',
+                onPressed: () {
+                  setState(() {
+                    _controller.penOnlyMode = !_controller.penOnlyMode;
+                  });
+                },
+              ),
+              const Spacer(),
+              // Compact Active Color Swatch + Brush Size Scrubber at bottom of rail
+              GestureDetector(
+                onVerticalDragUpdate: (details) {
+                  setState(() {
+                    _controller.brushSize = (_controller.brushSize - details.delta.dy * 0.25).clamp(1.0, 64.0);
+                  });
+                },
+                onTap: () async {
+                  final picked = await ColorPickerDialog.show(
+                    context,
+                    initialColor: _controller.primaryColor,
+                    documentColors: _controller.documentColors,
+                  );
+                  if (picked != null) {
                     setState(() {
-                      _controller.penOnlyMode = !_controller.penOnlyMode;
+                      _controller.primaryColor = picked;
                     });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(_controller.penOnlyMode
-                            ? 'Pen-Only Mode: Fingers pan/zoom, Stylus inks'
-                            : 'Touch Inking Enabled: Fingers can draw'),
-                        duration: const Duration(seconds: 2),
+                  }
+                },
+                child: Tooltip(
+                  message: 'Active Color & Brush (${_controller.brushSize.toInt()}px — Drag vertically to resize)',
+                  child: Column(
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: Color(_controller.primaryColor.value),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: StudioTheme.textPrimary, width: 1.5),
+                        ),
                       ),
-                    );
-                  },
-                ),
-                // Live Dynamic Brush Preview Orb + Vertical Scrubber
-                GestureDetector(
-                  onVerticalDragUpdate: (details) {
-                    setState(() {
-                      _controller.brushSize = (_controller.brushSize - details.delta.dy * 0.25).clamp(1.0, 64.0);
-                    });
-                  },
-                  child: Tooltip(
-                    message: 'Brush Size: ${_controller.brushSize.toInt()}px (Drag vertically to adjust)',
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: StudioTheme.obsidianElevated,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: StudioTheme.obsidianBorder),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_controller.brushSize.toInt()}px',
+                        style: const TextStyle(
+                          color: StudioTheme.textSecondary,
+                          fontSize: 9.5,
+                          fontFamily: 'monospace',
+                        ),
                       ),
-                      child: Column(
-                        children: [
-                          SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: Center(
-                              child: Container(
-                                width: _controller.brushSize.clamp(4.0, 26.0),
-                                height: _controller.brushSize.clamp(4.0, 26.0),
-                                decoration: BoxDecoration(
-                                  color: Color(_controller.primaryColor.value),
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: StudioTheme.accentCyanBright, width: 1.0),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 3),
-                          Text(
-                            '${_controller.brushSize.toInt()}px',
-                            style: const TextStyle(
-                              color: StudioTheme.accentAmberBright,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              fontFamily: 'monospace',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ),
                 ),
-                const Divider(color: StudioTheme.obsidianBorder, height: 16),
-                ..._colorSwatches(),
-                const SizedBox(height: 12),
-              ],
-            ),
+              ),
+              const SizedBox(height: 14),
+            ],
           ),
         );
       },
@@ -1191,46 +1149,44 @@ class _EditorScreenState extends State<EditorScreen>
 
   Widget _toolButton({
     required IconData icon,
-    required String label,
     required EditorTool tool,
     required String tooltip,
   }) {
     final isSelected = _controller.currentTool == tool;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 2),
       child: Tooltip(
         message: tooltip,
         child: InkWell(
           onTap: () => _controller.currentTool = tool,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(7),
           child: Container(
-            width: 58,
-            height: 46,
+            width: 38,
+            height: 36,
             decoration: BoxDecoration(
               color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: isSelected ? StudioTheme.accentAmber : Colors.transparent,
-                width: 1.5,
-              ),
+              borderRadius: BorderRadius.circular(7),
             ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Stack(
+              alignment: Alignment.center,
               children: [
+                if (isSelected)
+                  Positioned(
+                    left: 0,
+                    top: 8,
+                    bottom: 8,
+                    child: Container(
+                      width: 2.5,
+                      decoration: BoxDecoration(
+                        color: StudioTheme.accentCyanBright,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
                 Icon(
                   icon,
                   size: 18,
-                  color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: TextStyle(
-                    color: isSelected ? StudioTheme.textPrimary : StudioTheme.textMuted,
-                    fontSize: 8,
-                    fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
-                    fontFamily: 'monospace',
-                  ),
+                  color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
                 ),
               ],
             ),
@@ -1238,69 +1194,5 @@ class _EditorScreenState extends State<EditorScreen>
         ),
       ),
     );
-  }
-
-  List<Widget> _colorSwatches() {
-    final colors = [
-      const RgbaColor(0xFF000000),
-      const RgbaColor(0xFFEF4444),
-      const RgbaColor(0xFF06B6D4),
-      const RgbaColor(0xFF10B981),
-      const RgbaColor(0xFFF59E0B),
-    ];
-
-    final widgets = <Widget>[];
-
-    for (final c in colors) {
-      final isSelected = _controller.primaryColor == c;
-      widgets.add(
-        GestureDetector(
-          onTap: () {
-            setState(() {
-              _controller.primaryColor = c;
-            });
-          },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 5),
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: Color(c.value),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.obsidianBorderBright,
-                width: isSelected ? 2.5 : 1.2,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // Custom color picker button
-    widgets.add(
-      Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: IconButton(
-          icon: const Icon(Icons.colorize, size: 19),
-          tooltip: 'Custom Color (HSV Picker)',
-          color: StudioTheme.accentCyanBright,
-          onPressed: () async {
-            final picked = await ColorPickerDialog.show(
-              context,
-              initialColor: _controller.primaryColor,
-              documentColors: _controller.documentColors,
-            );
-            if (picked != null) {
-              setState(() {
-                _controller.primaryColor = picked;
-              });
-            }
-          },
-        ),
-      ),
-    );
-
-    return widgets;
   }
 }

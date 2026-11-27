@@ -4,7 +4,8 @@ import '../core/core.dart';
 import '../ui/transform_handles.dart';
 import 'render_adapters.dart';
 
-/// Paints a [Document] onto a Flutter Canvas along with optional onion-skin ghost frames.
+/// Paints a [Document] onto a Flutter Canvas along with precision artboard grid,
+/// center-axis crosshairs, stage label, and optional onion-skin ghost frames.
 class DocumentPainter extends CustomPainter {
   DocumentPainter({
     required this.document,
@@ -13,6 +14,8 @@ class DocumentPainter extends CustomPainter {
     this.peerPresences = const [],
     this.clipToArtboard = false,
     this.showArtboardFrame = true,
+    this.showGrid = false,
+    this.documentTitle = '',
     this.drawSelectionHandles = true,
     this.onionPrevDocument,
     this.onionNextDocument,
@@ -24,6 +27,8 @@ class DocumentPainter extends CustomPainter {
   final List<PeerPresence> peerPresences;
   final bool clipToArtboard;
   final bool showArtboardFrame;
+  final bool showGrid;
+  final String documentTitle;
   final bool drawSelectionHandles;
   final Document? onionPrevDocument;
   final Document? onionNextDocument;
@@ -33,11 +38,11 @@ class DocumentPainter extends CustomPainter {
     final artboardRect = Rect.fromLTWH(0, 0, document.width, document.height);
 
     if (showArtboardFrame) {
-      // Artboard shadow
+      // Artboard drop shadow
       canvas.drawShadow(
         Path()..addRect(artboardRect),
-        Colors.black.withValues(alpha: 0.5),
-        8.0,
+        Colors.black.withValues(alpha: 0.55),
+        14.0,
         true,
       );
 
@@ -45,14 +50,36 @@ class DocumentPainter extends CustomPainter {
       final bgColor = document.background?.toUiColor() ?? Colors.white;
       canvas.drawRect(artboardRect, Paint()..color = bgColor);
 
-      // Artboard boundary outline
+      // Subtle precision grid inside artboard
+      if (showGrid) {
+        _paintArtboardGrid(canvas, artboardRect, bgColor);
+      }
+
+      // Crisp 1px artboard boundary outline
       canvas.drawRect(
         artboardRect,
         Paint()
-          ..color = const Color(0xFF2A3442)
+          ..color = const Color(0xFF232B36)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.0,
       );
+
+      // Figma-style Artboard Title above top-left corner of artboard (outside the drawing area!)
+      final stageLabel = documentTitle.isNotEmpty
+          ? '$documentTitle  •  ${document.width.toInt()} × ${document.height.toInt()}'
+          : '${document.width.toInt()} × ${document.height.toInt()}';
+      final tp = TextPainter(
+        text: TextSpan(
+          text: stageLabel,
+          style: const TextStyle(
+            color: Color(0xFF64748B),
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      tp.paint(canvas, Offset(2, -tp.height - 6));
     } else if (document.background != null) {
       canvas.drawRect(
         artboardRect,
@@ -106,6 +133,20 @@ class DocumentPainter extends CustomPainter {
 
     if (peerPresences.isNotEmpty) {
       _paintPeerPresences(canvas);
+    }
+  }
+
+  void _paintArtboardGrid(Canvas canvas, Rect rect, Color bgColor) {
+    final isLight = bgColor.computeLuminance() > 0.5;
+    final gridPaint = Paint()
+      ..color = isLight ? const Color(0x14000000) : const Color(0x18FFFFFF)
+      ..strokeWidth = 1.0;
+    const step = 64.0;
+    for (double x = step; x < rect.width; x += step) {
+      canvas.drawLine(Offset(x, 0), Offset(x, rect.height), gridPaint);
+    }
+    for (double y = step; y < rect.height; y += step) {
+      canvas.drawLine(Offset(0, y), Offset(rect.width, y), gridPaint);
     }
   }
 
@@ -347,6 +388,8 @@ class DocumentPainter extends CustomPainter {
         oldDelegate.peerPresences != peerPresences ||
         oldDelegate.clipToArtboard != clipToArtboard ||
         oldDelegate.showArtboardFrame != showArtboardFrame ||
+        oldDelegate.showGrid != showGrid ||
+        oldDelegate.documentTitle != documentTitle ||
         oldDelegate.drawSelectionHandles != drawSelectionHandles ||
         oldDelegate.onionPrevDocument != onionPrevDocument ||
         oldDelegate.onionNextDocument != onionNextDocument;

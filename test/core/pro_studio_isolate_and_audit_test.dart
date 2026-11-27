@@ -217,5 +217,48 @@ void main() {
       expect(kf, isNotNull);
       expect(kf!.value, closeTo(250.0, 1e-3));
     });
+
+    test('EditorController defaults to EditorTool.select and isolates 120Hz drag via canvasRepaintNotifier', () {
+      final controller = EditorController();
+      expect(controller.currentTool, EditorTool.select);
+
+      final rectId = controller.insertRectangle(const Vec2(50, 50), const Vec2(150, 150));
+
+      var globalNotifyCount = 0;
+      var autoSaveDocChangedCount = 0;
+      var canvasRepaintCount = 0;
+
+      controller.addListener(() => globalNotifyCount++);
+      controller.onDocumentChanged = (_) => autoSaveDocChangedCount++;
+      controller.canvasRepaintNotifier.addListener(() => canvasRepaintCount++);
+
+      // Simulate 20 frames of 120Hz stylus drag
+      controller.beginTransformDrag(rectId, const Vec2(100, 100));
+      for (var i = 1; i <= 20; i++) {
+        controller.updateTransformDrag(Vec2(100.0 + i * 3, 100.0 + i * 2));
+      }
+
+      // During the 20 move ticks, canvasRepaintNotifier fired 20 times,
+      // while global UI listeners and AutoSave timer fired ZERO times!
+      expect(canvasRepaintCount, 20);
+      expect(globalNotifyCount, 0);
+      expect(autoSaveDocChangedCount, 0);
+
+      // Lifting the pointer commits the drag and notifies global UI & AutoSave once
+      controller.endTransformDrag();
+      expect(globalNotifyCount, 1);
+      expect(autoSaveDocChangedCount, 1);
+    });
+
+    test('RectNode.toPath() and EllipseNode.toPath() cache PathData in O(1) for Expando<ui.Path> hit', () {
+      const rect = RectNode(id: 'r_cache', x: 10, y: 20, width: 140, height: 90, cornerRadius: 12);
+      const ellipse = EllipseNode(id: 'e_cache', cx: 100, cy: 100, rx: 50, ry: 30);
+
+      expect(identical(rect.toPath(), rect.toPath()), isTrue);
+      expect(identical(rect.toPath().toUiPath(), rect.toPath().toUiPath()), isTrue);
+
+      expect(identical(ellipse.toPath(), ellipse.toPath()), isTrue);
+      expect(identical(ellipse.toPath().toUiPath(), ellipse.toPath().toUiPath()), isTrue);
+    });
   });
 }

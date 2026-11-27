@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
 import '../theme/studio_theme.dart';
 
-/// A stateful, drag-to-scrub numeric input field for the Pro Studio Properties Inspector.
+/// A sleek, Figma/Rive-inspired drag-to-scrub numeric input field.
 ///
 /// Features:
-/// - Preserves cursor position and focus while typing.
-/// - Commits edits both on keyboard submit (`onSubmitted`) AND when focus is lost.
-/// - Supports horizontal stylus/finger scrubbing across the label badge to adjust values
-///   fluidly at 120Hz with coalesced undo (`onScrubEnd`).
-/// - Supports an optional inline Keyframe Diamond (`◆`) indicator & 1-tap keyframe trigger
-///   that highlights in Electric Amber-Gold (`#FBBF24`) when the property is animated/keyed.
+/// - Clean flat matte fill (`obsidianVoid`) with subtle hairline border (`obsidianBorder`).
+/// - Left prefix label (`X`, `Y`, `W`, `H`, `R`, `Op`) supports horizontal drag-to-scrub at 120Hz.
+/// - Optional subtle keyframe diamond indicator (`◆`) that glows amber only when keyed.
 class ScrubbableNumberInput extends StatefulWidget {
   const ScrubbableNumberInput({
     super.key,
@@ -111,48 +108,29 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
 
   @override
   Widget build(BuildContext context) {
-    final activeBorderColor = _isScrubbing
+    final borderColor = _isScrubbing
         ? StudioTheme.accentAmber
-        : (_focusNode.hasFocus
-            ? StudioTheme.accentCyanBright
-            : (widget.isKeyframed ? StudioTheme.accentAmber.withAlpha(140) : StudioTheme.obsidianBorder));
+        : (_focusNode.hasFocus ? StudioTheme.accentCyan : StudioTheme.obsidianBorder);
 
     final valueColor = widget.readOnly
         ? StudioTheme.textMuted
-        : (widget.isKeyframed || _isScrubbing
+        : (_isScrubbing
             ? StudioTheme.accentAmberBright
-            : StudioTheme.textPrimary);
+            : (widget.isKeyframed ? StudioTheme.accentAmberBright : StudioTheme.textPrimary));
 
     return Container(
-      height: 32,
+      height: 30,
       decoration: BoxDecoration(
-        color: widget.readOnly ? StudioTheme.obsidianVoid : StudioTheme.obsidianElevated,
-        borderRadius: BorderRadius.circular(6),
+        color: StudioTheme.obsidianVoid,
+        borderRadius: BorderRadius.circular(5),
         border: Border.all(
-          color: activeBorderColor,
-          width: (_isScrubbing || _focusNode.hasFocus) ? 1.5 : 1.0,
+          color: borderColor,
+          width: (_isScrubbing || _focusNode.hasFocus) ? 1.2 : 1.0,
         ),
       ),
       child: Row(
         children: [
-          // Optional 1-Tap Keyframe Diamond Toggle (`◆`)
-          if (widget.onToggleKeyframe != null)
-            InkWell(
-              onTap: widget.onToggleKeyframe,
-              borderRadius: const BorderRadius.horizontal(left: Radius.circular(5)),
-              child: Padding(
-                padding: const EdgeInsets.only(left: 6, right: 2),
-                child: Icon(
-                  Icons.diamond,
-                  size: 10,
-                  color: widget.isKeyframed
-                      ? StudioTheme.accentAmberBright
-                      : StudioTheme.textMuted.withAlpha(110),
-                ),
-              ),
-            ),
-
-          // Scrubbable prefix badge
+          // Drag-to-Scrub Prefix Label
           GestureDetector(
             behavior: HitTestBehavior.opaque,
             onHorizontalDragStart: widget.readOnly
@@ -184,33 +162,21 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
               cursor: widget.readOnly
                   ? SystemMouseCursors.basic
                   : SystemMouseCursors.resizeLeftRight,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: _isScrubbing
-                      ? StudioTheme.accentAmberSurface
-                      : Colors.transparent,
-                  borderRadius: widget.onToggleKeyframe == null
-                      ? const BorderRadius.horizontal(left: Radius.circular(5))
-                      : null,
-                ),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, right: 4),
                 child: Text(
                   widget.label,
                   style: TextStyle(
-                    color: _isScrubbing
-                        ? StudioTheme.accentAmberBright
-                        : StudioTheme.textSecondary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    fontFamily: 'monospace',
+                    color: _isScrubbing ? StudioTheme.accentAmberBright : StudioTheme.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
             ),
           ),
 
-          // Numeric Text Input (Right-aligned monospace like the inspiration mockup)
+          // Numeric Text Input
           Expanded(
             child: TextField(
               controller: _textController,
@@ -221,17 +187,34 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
                 color: valueColor,
                 fontSize: 12,
                 fontFamily: 'monospace',
-                fontWeight: FontWeight.w800,
+                fontWeight: FontWeight.w600,
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
               decoration: const InputDecoration(
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                 border: InputBorder.none,
               ),
               onSubmitted: _commitText,
             ),
           ),
+
+          // Optional Subtle Keyframe Diamond Button on Right Edge
+          if (widget.onToggleKeyframe != null)
+            InkWell(
+              onTap: widget.onToggleKeyframe,
+              borderRadius: const BorderRadius.horizontal(right: Radius.circular(4)),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                child: Icon(
+                  Icons.diamond,
+                  size: 9,
+                  color: widget.isKeyframed
+                      ? StudioTheme.accentAmber
+                      : StudioTheme.textMuted.withAlpha(80),
+                ),
+              ),
+            ),
         ],
       ),
     );

@@ -124,13 +124,28 @@ class Document {
 
       final localPoint = fullMatrix.inverted().apply(point);
 
-      if (node is ShapeNode) {
+      if (node is RectNode) {
+        if (node.localBounds.inflate(strokeTolerance).containsPoint(localPoint)) {
+          return node;
+        }
+      } else if (node is EllipseNode) {
+        if (!node.localBounds.inflate(strokeTolerance).containsPoint(localPoint)) {
+          continue;
+        }
+        final path = node.toPath();
+        if (path.containsPoint(localPoint) || path.hitTestStroke(localPoint, strokeTolerance)) {
+          return node;
+        }
+      } else if (node is ShapeNode) {
+        if (!node.localBounds.inflate(strokeTolerance).containsPoint(localPoint)) {
+          continue;
+        }
         final path = node.toPath();
         if (path.containsPoint(localPoint) || path.hitTestStroke(localPoint, strokeTolerance)) {
           return node;
         }
       } else if (node is TextNode) {
-        if (node.localBounds.containsPoint(localPoint)) {
+        if (node.localBounds.inflate(strokeTolerance).containsPoint(localPoint)) {
           return node;
         }
       }
