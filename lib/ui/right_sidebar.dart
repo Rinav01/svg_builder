@@ -2,10 +2,11 @@ import 'package:flutter/material.dart';
 import 'editor_controller.dart';
 import 'layers_panel.dart';
 import 'properties_panel.dart';
+import 'theme/studio_theme.dart';
 
 enum SidebarTab { layers, properties }
 
-/// Unified right sidebar hosting Layers hierarchy and Properties inspector in tabs.
+/// Unified right sidebar hosting Layers hierarchy and Properties inspector in solid matte tabs.
 class RightSidebar extends StatefulWidget {
   const RightSidebar({
     super.key,
@@ -34,23 +35,26 @@ class _RightSidebarState extends State<RightSidebar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 270,
-      color: const Color(0xFF1E1E1E),
+      width: 280,
+      decoration: const BoxDecoration(
+        color: StudioTheme.obsidianSurface,
+        border: Border(left: BorderSide(color: StudioTheme.obsidianBorder)),
+      ),
       child: Column(
         children: [
-          // Tab bar header
+          // Single unified tab bar header (no duplicate nested headers)
           Container(
-            height: 40,
-            color: const Color(0xFF252525),
-            padding: const EdgeInsets.symmetric(horizontal: 6),
+            height: 44,
+            color: StudioTheme.obsidianElevated,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
             child: Row(
               children: [
                 Expanded(child: _tabButton('Layers', Icons.layers, SidebarTab.layers)),
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Expanded(child: _tabButton('Properties', Icons.tune, SidebarTab.properties)),
                 const SizedBox(width: 4),
                 IconButton(
-                  icon: const Icon(Icons.close, size: 16, color: Colors.white70),
+                  icon: const Icon(Icons.close, size: 16, color: StudioTheme.textSecondary),
                   tooltip: 'Close sidebar',
                   onPressed: widget.onClose,
                   padding: EdgeInsets.zero,
@@ -59,7 +63,7 @@ class _RightSidebarState extends State<RightSidebar> {
               ],
             ),
           ),
-          const Divider(color: Colors.white12, height: 1),
+          const Divider(color: StudioTheme.obsidianBorder, height: 1),
 
           // Active tab view
           Expanded(
@@ -82,15 +86,16 @@ class _RightSidebarState extends State<RightSidebar> {
     final isActive = _activeTab == tab;
     return InkWell(
       onTap: () => setState(() => _activeTab = tab),
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
       child: Container(
         alignment: Alignment.center,
         padding: const EdgeInsets.symmetric(vertical: 6),
         decoration: BoxDecoration(
-          color: isActive ? Colors.blueAccent.withValues(alpha: 0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
+          color: isActive ? StudioTheme.accentCyanSurface : StudioTheme.obsidianSurface,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: isActive ? Colors.blueAccent.withValues(alpha: 0.5) : Colors.transparent,
+            color: isActive ? StudioTheme.accentCyan : StudioTheme.obsidianBorder,
+            width: isActive ? 1.5 : 1.0,
           ),
         ),
         child: Row(
@@ -99,17 +104,17 @@ class _RightSidebarState extends State<RightSidebar> {
           children: [
             Icon(
               icon,
-              size: 13,
-              color: isActive ? Colors.blueAccent : Colors.white70,
+              size: 14,
+              color: isActive ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 5),
             Flexible(
               child: Text(
                 title,
                 style: TextStyle(
-                  color: isActive ? Colors.blueAccent : Colors.white70,
-                  fontSize: 11,
-                  fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                  color: isActive ? StudioTheme.textPrimary : StudioTheme.textSecondary,
+                  fontSize: 12,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                 ),
                 overflow: TextOverflow.ellipsis,
               ),

@@ -4,7 +4,7 @@ import '../core/core.dart';
 import '../ui/transform_handles.dart';
 import 'render_adapters.dart';
 
-/// Paints a [Document] onto a Flutter Canvas along with interactive selection handles.
+/// Paints a [Document] onto a Flutter Canvas along with optional onion-skin ghost frames.
 class DocumentPainter extends CustomPainter {
   DocumentPainter({
     required this.document,
@@ -13,6 +13,9 @@ class DocumentPainter extends CustomPainter {
     this.peerPresences = const [],
     this.clipToArtboard = false,
     this.showArtboardFrame = true,
+    this.drawSelectionHandles = true,
+    this.onionPrevDocument,
+    this.onionNextDocument,
   });
 
   final Document document;
@@ -21,6 +24,9 @@ class DocumentPainter extends CustomPainter {
   final List<PeerPresence> peerPresences;
   final bool clipToArtboard;
   final bool showArtboardFrame;
+  final bool drawSelectionHandles;
+  final Document? onionPrevDocument;
+  final Document? onionNextDocument;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -43,7 +49,7 @@ class DocumentPainter extends CustomPainter {
       canvas.drawRect(
         artboardRect,
         Paint()
-          ..color = Colors.white24
+          ..color = const Color(0xFF2A3442)
           ..style = PaintingStyle.stroke
           ..strokeWidth = 1.0,
       );
@@ -59,6 +65,33 @@ class DocumentPainter extends CustomPainter {
       canvas.clipRect(artboardRect);
     }
 
+    // Onion skinning: previous frame (warm amber/rose tint) & next frame (cool teal-cyan tint)
+    if (onionPrevDocument != null) {
+      canvas.saveLayer(
+        artboardRect,
+        Paint()
+          ..color = const Color.fromRGBO(255, 255, 255, 0.22)
+          ..colorFilter = const ColorFilter.mode(Color(0xAAF59E0B), BlendMode.modulate),
+      );
+      for (final layer in onionPrevDocument!.layers) {
+        _paintNode(canvas, layer);
+      }
+      canvas.restore();
+    }
+
+    if (onionNextDocument != null) {
+      canvas.saveLayer(
+        artboardRect,
+        Paint()
+          ..color = const Color.fromRGBO(255, 255, 255, 0.22)
+          ..colorFilter = const ColorFilter.mode(Color(0xAA06B6D4), BlendMode.modulate),
+      );
+      for (final layer in onionNextDocument!.layers) {
+        _paintNode(canvas, layer);
+      }
+      canvas.restore();
+    }
+
     for (final layer in document.layers) {
       _paintNode(canvas, layer);
     }
@@ -67,7 +100,7 @@ class DocumentPainter extends CustomPainter {
       canvas.restore();
     }
 
-    if (selectedNodeIds.isNotEmpty) {
+    if (drawSelectionHandles && selectedNodeIds.isNotEmpty) {
       _paintSelections(canvas);
     }
 
@@ -313,6 +346,9 @@ class DocumentPainter extends CustomPainter {
         oldDelegate.isNodeEditMode != isNodeEditMode ||
         oldDelegate.peerPresences != peerPresences ||
         oldDelegate.clipToArtboard != clipToArtboard ||
-        oldDelegate.showArtboardFrame != showArtboardFrame;
+        oldDelegate.showArtboardFrame != showArtboardFrame ||
+        oldDelegate.drawSelectionHandles != drawSelectionHandles ||
+        oldDelegate.onionPrevDocument != onionPrevDocument ||
+        oldDelegate.onionNextDocument != onionNextDocument;
   }
 }

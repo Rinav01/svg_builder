@@ -3,9 +3,17 @@ import '../core/core.dart';
 import '../render/render_adapters.dart';
 import 'color_picker_dialog.dart';
 import 'editor_controller.dart';
+import 'theme/studio_theme.dart';
+import 'widgets/scrubbable_number_input.dart';
 
 /// Properties inspector panel displaying and editing attributes of selected nodes or document.
-class PropertiesPanel extends StatelessWidget {
+///
+/// Features:
+/// - Drag-to-scrub numeric inputs (`ScrubbableNumberInput`) with focus retention and coalesced undo.
+/// - Auto-Keying integration when modifying animated nodes at `currentTime > 0`.
+/// - Dynamic Freehand Brush Re-fitting for `PathNode`s with raw stylus telemetry.
+/// - Quick 1-Tap Artboard/Selection Alignment Toolbar.
+class PropertiesPanel extends StatefulWidget {
   const PropertiesPanel({
     super.key,
     required this.controller,
@@ -15,18 +23,13 @@ class PropertiesPanel extends StatelessWidget {
   final EditorController controller;
   final VoidCallback onClose;
 
-  List<RgbaColor> _extractDocumentColors(Document doc) {
-    final colors = <RgbaColor>{};
-    for (final node in doc.walk()) {
-      if (node is ShapeNode) {
-        if (node.style.fill != null) colors.add(node.style.fill!);
-        if (node.style.stroke != null) colors.add(node.style.stroke!);
-      } else if (node is TextNode) {
-        if (node.fill != null) colors.add(node.fill!);
-      }
-    }
-    return colors.toList();
-  }
+  @override
+  State<PropertiesPanel> createState() => _PropertiesPanelState();
+}
+
+class _PropertiesPanelState extends State<PropertiesPanel> {
+  EditorController get controller => widget.controller;
+  double _activeFreehandSize = 8.0;
 
   @override
   Widget build(BuildContext context) {
@@ -35,161 +38,327 @@ class PropertiesPanel extends StatelessWidget {
       builder: (context, _) {
         final selectedIds = controller.selectedNodeIds;
         final selectedNode = selectedIds.length == 1
-            ? controller.document.findById(selectedIds.first)
+            ? controller.renderedDocument.findById(selectedIds.first) ??
+                controller.document.findById(selectedIds.first)
             : null;
 
         return Material(
-          color: const Color(0xFF1E1E1E),
-          child: SizedBox(
-            width: 270,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  color: const Color(0xFF252525),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.tune, size: 16, color: Colors.blueAccent),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          selectedNode != null
-                              ? '${selectedNode.typeName} Properties'
-                              : (selectedIds.length > 1
-                                  ? '${selectedIds.length} Objects Selected'
-                                  : 'Document Properties'),
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
+          color: StudioTheme.obsidianSurface,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Context Banner (no redundant [X Close] button)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: StudioTheme.obsidianVoid,
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: selectedNode != null ? StudioTheme.accentAmber : StudioTheme.accentCyan,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        selectedNode != null
+                            ? '${selectedNode.typeName.toUpperCase()} INSPECTOR'
+                            : (selectedIds.length > 1
+                                ? '${selectedIds.length} OBJECTS SELECTED'
+                                : 'ARTBOARD & DOCUMENT'),
+                        style: const TextStyle(
+                          color: StudioTheme.textSecondary,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 10,
+                          letterSpacing: 1.0,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (controller.currentTime > 0 &&
+                        selectedNode != null &&
+                        controller.document.animations.containsKey(selectedNode.id))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.accentAmberSurface,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: StudioTheme.accentAmber),
+                        ),
+                        child: const Text(
+                          'AUTO-KEY',
+                          style: TextStyle(
+                            color: StudioTheme.accentAmberBright,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w900,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.close, size: 16, color: Colors.white70),
-                        tooltip: 'Close panel',
-                        onPressed: onClose,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                      ),
-                    ],
-                  ),
+                  ],
                 ),
-                const Divider(color: Colors.white12, height: 1),
+              ),
+              const Divider(color: StudioTheme.obsidianBorder, height: 1),
 
-                // Content body
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    child: selectedNode != null
-                        ? _buildNodeInspector(context, selectedNode)
-                        : (selectedIds.length > 1
-                            ? _buildMultiSelectionInspector(context)
-                            : _buildDocumentInspector(context)),
-                  ),
-                ),
+              // Quick Alignment Bar when 1 or more objects are selected
+              if (selectedIds.isNotEmpty) ...[
+                _buildAlignmentToolbar(),
+                const Divider(color: StudioTheme.obsidianBorder, height: 1),
               ],
-            ),
+
+              // Content body
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: selectedNode != null
+                      ? _buildNodeInspector(context, selectedNode)
+                      : (selectedIds.length > 1
+                          ? _buildMultiSelectionInspector(context)
+                          : _buildDocumentInspector(context)),
+                ),
+              ),
+            ],
           ),
         );
       },
     );
   }
 
+  Widget _buildAlignmentToolbar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      color: StudioTheme.obsidianSurface,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _alignBtn(Icons.align_horizontal_left, 'Align Left', AlignmentTarget.left),
+          _alignBtn(Icons.align_horizontal_center, 'Align Center X', AlignmentTarget.centerHorizontal),
+          _alignBtn(Icons.align_horizontal_right, 'Align Right', AlignmentTarget.right),
+          _alignBtn(Icons.align_vertical_top, 'Align Top', AlignmentTarget.top),
+          _alignBtn(Icons.align_vertical_center, 'Align Center Y', AlignmentTarget.centerVertical),
+          _alignBtn(Icons.align_vertical_bottom, 'Align Bottom', AlignmentTarget.bottom),
+        ],
+      ),
+    );
+  }
+
+  Widget _alignBtn(IconData icon, String tooltip, AlignmentTarget target) {
+    return IconButton(
+      icon: Icon(icon, size: 16, color: StudioTheme.textSecondary),
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+      onPressed: () => controller.alignSelected(target),
+    );
+  }
+
   Widget _buildNodeInspector(BuildContext context, Node node) {
     final t = node.transform;
     final b = node.localBounds;
-    final docColors = _extractDocumentColors(controller.document);
+    final docColors = controller.documentColors;
+    final visualW = (b.width * t.scaleX).abs();
+    final visualH = (b.height * t.scaleY).abs();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Name & Identity
-        _sectionTitle('General'),
-        _textRow('Name', node.name.isNotEmpty ? node.name : node.typeName, (val) {
-          controller.updateNode(node.id, (n) => n.withBase(name: val), label: 'Rename');
-        }),
-        const SizedBox(height: 12),
+        _sectionTitle('Identity'),
+        _StatefulTextRow(
+          key: ValueKey('name-${node.id}'),
+          label: 'Name',
+          value: node.name.isNotEmpty ? node.name : node.typeName,
+          onSubmitted: (val) {
+            controller.updateNode(node.id, (n) => n.withBase(name: val), label: 'Rename');
+          },
+        ),
+        const SizedBox(height: 14),
 
-        // Transform (Position & Size)
-        _sectionTitle('Transform'),
+        // Transform (Drag-to-Scrub Position, Size, Rotation, Opacity)
+        _sectionTitle('Transform (Drag Label to Scrub)'),
         Row(
           children: [
             Expanded(
-              child: _numField('X', t.x, (val) {
-                controller.updateNode(
-                  node.id,
-                  (n) => n.withBase(transform: t.copyWith(x: val)),
-                  label: 'Move X',
-                );
-              }),
+              child: ScrubbableNumberInput(
+                label: 'X',
+                value: t.x,
+                onChanged: (val, {required isScrubbing}) {
+                  controller.updateAnimatableProperty(
+                    node.id,
+                    AnimProperty.x,
+                    val,
+                    (n) => n.withBase(transform: n.transform.copyWith(x: val)),
+                    label: 'Move X',
+                    mergeKey: 'prop-x-${node.id}',
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _numField('Y', t.y, (val) {
-                controller.updateNode(
-                  node.id,
-                  (n) => n.withBase(transform: t.copyWith(y: val)),
-                  label: 'Move Y',
-                );
-              }),
+              child: ScrubbableNumberInput(
+                label: 'Y',
+                value: t.y,
+                onChanged: (val, {required isScrubbing}) {
+                  controller.updateAnimatableProperty(
+                    node.id,
+                    AnimProperty.y,
+                    val,
+                    (n) => n.withBase(transform: n.transform.copyWith(y: val)),
+                    label: 'Move Y',
+                    mergeKey: 'prop-y-${node.id}',
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _numField('W', b.width, (val) {
-                if (val <= 0) return;
-                if (node is RectNode) {
-                  controller.updateNode(node.id, (n) => (n as RectNode).copyWith(width: val), label: 'Resize Width');
-                } else if (node is EllipseNode) {
-                  controller.updateNode(node.id, (n) => (n as EllipseNode).copyWith(rx: val / 2), label: 'Resize Width');
-                }
-              }, readOnly: node is! RectNode && node is! EllipseNode),
+              child: ScrubbableNumberInput(
+                label: 'W',
+                value: visualW,
+                min: 1.0,
+                readOnly: node is! RectNode && node is! EllipseNode,
+                onChanged: (val, {required isScrubbing}) {
+                  if (val <= 0) return;
+                  if (node is RectNode) {
+                    controller.updateNode(
+                      node.id,
+                      (n) => (n as RectNode).copyWith(
+                        width: val,
+                        transform: n.transform.copyWith(scaleX: 1.0),
+                      ),
+                      label: 'Resize Width',
+                      mergeKey: 'prop-w-${node.id}',
+                      merge: isScrubbing,
+                    );
+                  } else if (node is EllipseNode) {
+                    controller.updateNode(
+                      node.id,
+                      (n) => (n as EllipseNode).copyWith(
+                        rx: val / 2,
+                        transform: n.transform.copyWith(scaleX: 1.0),
+                      ),
+                      label: 'Resize Width',
+                      mergeKey: 'prop-w-${node.id}',
+                      merge: isScrubbing,
+                    );
+                  }
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _numField('H', b.height, (val) {
-                if (val <= 0) return;
-                if (node is RectNode) {
-                  controller.updateNode(node.id, (n) => (n as RectNode).copyWith(height: val), label: 'Resize Height');
-                } else if (node is EllipseNode) {
-                  controller.updateNode(node.id, (n) => (n as EllipseNode).copyWith(ry: val / 2), label: 'Resize Height');
-                }
-              }, readOnly: node is! RectNode && node is! EllipseNode),
+              child: ScrubbableNumberInput(
+                label: 'H',
+                value: visualH,
+                min: 1.0,
+                readOnly: node is! RectNode && node is! EllipseNode,
+                onChanged: (val, {required isScrubbing}) {
+                  if (val <= 0) return;
+                  if (node is RectNode) {
+                    controller.updateNode(
+                      node.id,
+                      (n) => (n as RectNode).copyWith(
+                        height: val,
+                        transform: n.transform.copyWith(scaleY: 1.0),
+                      ),
+                      label: 'Resize Height',
+                      mergeKey: 'prop-h-${node.id}',
+                      merge: isScrubbing,
+                    );
+                  } else if (node is EllipseNode) {
+                    controller.updateNode(
+                      node.id,
+                      (n) => (n as EllipseNode).copyWith(
+                        ry: val / 2,
+                        transform: n.transform.copyWith(scaleY: 1.0),
+                      ),
+                      label: 'Resize Height',
+                      mergeKey: 'prop-h-${node.id}',
+                      merge: isScrubbing,
+                    );
+                  }
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Row(
           children: [
             Expanded(
-              child: _numField('Rotation°', t.rotation, (val) {
-                controller.updateNode(
-                  node.id,
-                  (n) => n.withBase(transform: t.copyWith(rotation: val % 360)),
-                  label: 'Rotate',
-                );
-              }),
+              child: ScrubbableNumberInput(
+                label: 'R°',
+                value: t.rotation,
+                onChanged: (val, {required isScrubbing}) {
+                  controller.updateAnimatableProperty(
+                    node.id,
+                    AnimProperty.rotation,
+                    val % 360,
+                    (n) => n.withBase(transform: n.transform.withOrigin(b.center).copyWith(rotation: val % 360)),
+                    label: 'Rotate',
+                    mergeKey: 'prop-rot-${node.id}',
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: _numField('Opacity %', (node.opacity * 100).roundToDouble(), (val) {
-                controller.updateNode(
-                  node.id,
-                  (n) => n.withBase(opacity: (val / 100).clamp(0.0, 1.0)),
-                  label: 'Change Opacity',
-                );
-              }),
+              child: ScrubbableNumberInput(
+                label: 'Op%',
+                value: (node.opacity * 100).roundToDouble(),
+                min: 0.0,
+                max: 100.0,
+                decimals: 0,
+                onChanged: (val, {required isScrubbing}) {
+                  final op = (val / 100.0).clamp(0.0, 1.0);
+                  controller.updateAnimatableProperty(
+                    node.id,
+                    AnimProperty.opacity,
+                    op,
+                    (n) => n.withBase(opacity: op),
+                    label: 'Change Opacity',
+                    mergeKey: 'prop-op-${node.id}',
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
             ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
+
+        // Dynamic Freehand Brush Re-fitting for PathNode with stylus samples
+        if (node is PathNode && node.samples != null && node.samples!.isNotEmpty) ...[
+          _sectionTitle('Dynamic Freehand Brush'),
+          _sliderRow(
+            label: 'Thickness',
+            value: _activeFreehandSize,
+            min: 1.0,
+            max: 64.0,
+            onChanged: (val) {
+              setState(() => _activeFreehandSize = val);
+              controller.reStyleStrokeWidth(node.id, val, merge: true);
+            },
+            onChangeEnd: (_) => controller.commitMerge(),
+          ),
+          const SizedBox(height: 12),
+        ],
 
         // Shape Appearance (Fill & Stroke)
         if (node is ShapeNode) ...[
@@ -209,14 +378,16 @@ class PropertiesPanel extends StatelessWidget {
               );
             },
             onPick: (c) {
-              controller.updateNode(
+              controller.updateAnimatableProperty(
                 node.id,
-                (n) => (n as ShapeNode).withStyle(node.style.copyWith(fill: c)),
+                AnimProperty.fill,
+                c.value.toDouble(),
+                (n) => (n as ShapeNode).withStyle((n).style.copyWith(fill: c)),
                 label: 'Change Fill Color',
               );
             },
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           _colorPickerRow(
             context: context,
             label: 'Stroke',
@@ -232,47 +403,87 @@ class PropertiesPanel extends StatelessWidget {
               );
             },
             onPick: (c) {
-              controller.updateNode(
+              controller.updateAnimatableProperty(
                 node.id,
-                (n) => (n as ShapeNode).withStyle(node.style.copyWith(stroke: c)),
+                AnimProperty.stroke,
+                c.value.toDouble(),
+                (n) => (n as ShapeNode).withStyle((n).style.copyWith(stroke: c)),
                 label: 'Change Stroke Color',
               );
             },
           ),
           if (node.style.hasStroke) ...[
             const SizedBox(height: 6),
-            _sliderRow('Width', node.style.strokeWidth, 0.5, 48.0, (val) {
-              controller.updateNode(
-                node.id,
-                (n) => (n as ShapeNode).withStyle(node.style.copyWith(strokeWidth: val)),
-                label: 'Stroke Width',
-              );
-            }),
+            _sliderRow(
+              label: 'Width',
+              value: node.style.strokeWidth,
+              min: 0.5,
+              max: 48.0,
+              onChanged: (val) {
+                controller.updateAnimatableProperty(
+                  node.id,
+                  AnimProperty.strokeWidth,
+                  val,
+                  (n) => (n as ShapeNode).withStyle((n).style.copyWith(strokeWidth: val)),
+                  label: 'Stroke Width',
+                  mergeKey: 'stroke-w-${node.id}',
+                  merge: true,
+                );
+              },
+              onChangeEnd: (_) => controller.commitMerge(),
+            ),
           ],
           if (node is RectNode) ...[
             const SizedBox(height: 6),
-            _sliderRow('Radius', node.cornerRadius, 0.0, (node.width < node.height ? node.width : node.height) / 2, (val) {
-              controller.updateNode(
-                node.id,
-                (n) => (n as RectNode).copyWith(cornerRadius: val),
-                label: 'Corner Radius',
-              );
-            }),
+            _sliderRow(
+              label: 'Radius',
+              value: node.cornerRadius,
+              min: 0.0,
+              max: (node.width < node.height ? node.width : node.height) / 2,
+              onChanged: (val) {
+                controller.updateNode(
+                  node.id,
+                  (n) => (n as RectNode).copyWith(cornerRadius: val),
+                  label: 'Corner Radius',
+                  mergeKey: 'corner-r-${node.id}',
+                  merge: true,
+                );
+              },
+              onChangeEnd: (_) => controller.commitMerge(),
+            ),
           ],
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
         ],
 
         // Typography (for TextNode)
         if (node is TextNode) ...[
           _sectionTitle('Typography'),
-          _textRow('Content', node.text, (val) {
-            controller.updateNode(node.id, (n) => (n as TextNode).copyWith(text: val), label: 'Edit Text');
-          }),
-          const SizedBox(height: 6),
-          _sliderRow('Size', node.fontSize, 8.0, 96.0, (val) {
-            controller.updateNode(node.id, (n) => (n as TextNode).copyWith(fontSize: val), label: 'Font Size');
-          }),
-          const SizedBox(height: 6),
+          _StatefulTextRow(
+            key: ValueKey('text-${node.id}'),
+            label: 'Content',
+            value: node.text,
+            onSubmitted: (val) {
+              controller.updateNode(node.id, (n) => (n as TextNode).copyWith(text: val), label: 'Edit Text');
+            },
+          ),
+          const SizedBox(height: 8),
+          _sliderRow(
+            label: 'Size',
+            value: node.fontSize,
+            min: 8.0,
+            max: 120.0,
+            onChanged: (val) {
+              controller.updateNode(
+                node.id,
+                (n) => (n as TextNode).copyWith(fontSize: val),
+                label: 'Font Size',
+                mergeKey: 'font-sz-${node.id}',
+                merge: true,
+              );
+            },
+            onChangeEnd: (_) => controller.commitMerge(),
+          ),
+          const SizedBox(height: 8),
           _colorPickerRow(
             context: context,
             label: 'Text Color',
@@ -281,14 +492,20 @@ class PropertiesPanel extends StatelessWidget {
             docColors: docColors,
             onToggle: (_) {},
             onPick: (c) {
-              controller.updateNode(node.id, (n) => (n as TextNode).copyWith(fill: c), label: 'Text Color');
+              controller.updateAnimatableProperty(
+                node.id,
+                AnimProperty.fill,
+                c.value.toDouble(),
+                (n) => (n as TextNode).copyWith(fill: c),
+                label: 'Text Color',
+              );
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
         ],
 
         // Ordering & Arrangement
-        _sectionTitle('Arrangement'),
+        _sectionTitle('Z-Order Arrangement'),
         Wrap(
           spacing: 6,
           runSpacing: 6,
@@ -309,19 +526,37 @@ class PropertiesPanel extends StatelessWidget {
       children: [
         _sectionTitle('Multi-Selection'),
         Text(
-          '${controller.selectedNodeIds.length} items selected.',
-          style: const TextStyle(color: Colors.white70, fontSize: 13),
+          '${controller.selectedNodeIds.length} objects selected.',
+          style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 12),
-        ElevatedButton.icon(
+        const SizedBox(height: 14),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: StudioTheme.accentCyan,
+            foregroundColor: StudioTheme.obsidianVoid,
+          ),
           icon: const Icon(Icons.folder, size: 16),
-          label: const Text('Group Elements'),
+          label: const Text('Group Elements', style: TextStyle(fontWeight: FontWeight.bold)),
           onPressed: () => controller.groupSelected(),
         ),
-        const SizedBox(height: 6),
-        ElevatedButton.icon(
-          icon: const Icon(Icons.delete_outline, size: 16, color: Colors.redAccent),
-          label: const Text('Delete Selected', style: TextStyle(color: Colors.redAccent)),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: StudioTheme.accentAmberBright,
+            side: const BorderSide(color: StudioTheme.accentAmber),
+          ),
+          icon: const Icon(Icons.copy, size: 16),
+          label: const Text('Duplicate All'),
+          onPressed: () => controller.duplicateSelected(),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: StudioTheme.dangerCrimson,
+            side: const BorderSide(color: StudioTheme.dangerCrimson),
+          ),
+          icon: const Icon(Icons.delete_outline, size: 16),
+          label: const Text('Delete Selected'),
           onPressed: () => controller.deleteSelected(),
         ),
       ],
@@ -330,21 +565,57 @@ class PropertiesPanel extends StatelessWidget {
 
   Widget _buildDocumentInspector(BuildContext context) {
     final doc = controller.document;
-    final docColors = _extractDocumentColors(doc);
+    final docColors = controller.documentColors;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _sectionTitle('Canvas Size'),
+        _sectionTitle('Artboard Dimensions'),
         Row(
           children: [
-            Expanded(child: _numField('Width', doc.width, (w) {}, readOnly: true)),
+            Expanded(
+              child: ScrubbableNumberInput(
+                label: 'W',
+                value: doc.width,
+                min: 64,
+                max: 8192,
+                decimals: 0,
+                onChanged: (w, {required isScrubbing}) {
+                  controller.execute(
+                    UpdateDocumentCommand(
+                      (d) => d.copyWith(width: w),
+                      label: 'Resize Artboard W',
+                    ),
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
+            ),
             const SizedBox(width: 8),
-            Expanded(child: _numField('Height', doc.height, (h) {}, readOnly: true)),
+            Expanded(
+              child: ScrubbableNumberInput(
+                label: 'H',
+                value: doc.height,
+                min: 64,
+                max: 8192,
+                decimals: 0,
+                onChanged: (h, {required isScrubbing}) {
+                  controller.execute(
+                    UpdateDocumentCommand(
+                      (d) => d.copyWith(height: h),
+                      label: 'Resize Artboard H',
+                    ),
+                    merge: isScrubbing,
+                  );
+                },
+                onScrubEnd: controller.commitMerge,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 12),
-        _sectionTitle('Background'),
+        const SizedBox(height: 14),
+        _sectionTitle('Artboard Background'),
         _colorPickerRow(
           context: context,
           label: 'Canvas Bg',
@@ -371,13 +642,31 @@ class PropertiesPanel extends StatelessWidget {
             );
           },
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 14),
         _sectionTitle('Timeline Setup'),
         Row(
           children: [
-            Expanded(child: _numField('Duration (s)', doc.duration, (d) {}, readOnly: true)),
+            Expanded(
+              child: ScrubbableNumberInput(
+                label: 'Dur(s)',
+                value: doc.duration,
+                min: 0.5,
+                max: 120.0,
+                sensitivity: 0.1,
+                onChanged: (d, {required isScrubbing}) => controller.setDocumentDuration(d),
+              ),
+            ),
             const SizedBox(width: 8),
-            Expanded(child: _numField('FPS', doc.fps, (f) {}, readOnly: true)),
+            Expanded(
+              child: ScrubbableNumberInput(
+                label: 'FPS',
+                value: doc.fps,
+                min: 1,
+                max: 120,
+                decimals: 0,
+                onChanged: (f, {required isScrubbing}) => controller.setDocumentFps(f),
+              ),
+            ),
           ],
         ),
       ],
@@ -390,86 +679,58 @@ class PropertiesPanel extends StatelessWidget {
       child: Text(
         title.toUpperCase(),
         style: const TextStyle(
-          color: Colors.white38,
+          color: StudioTheme.textMuted,
           fontSize: 10,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 1.0,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
         ),
       ),
     );
   }
 
-  Widget _textRow(String label, String value, void Function(String) onSubmitted) {
+  Widget _sliderRow({
+    required String label,
+    required double value,
+    required double min,
+    required double max,
+    required void Function(double) onChanged,
+    void Function(double)? onChangeEnd,
+  }) {
+    final safeMax = max > min ? max : min + 1.0;
     return Row(
       children: [
-        SizedBox(width: 60, child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12))),
-        Expanded(
-          child: SizedBox(
-            height: 28,
-            child: TextField(
-              controller: TextEditingController(text: value),
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-              decoration: const InputDecoration(
-                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white12)),
-                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
-              ),
-              onSubmitted: onSubmitted,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _numField(String label, double value, void Function(double) onChanged, {bool readOnly = false}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 10)),
-        const SizedBox(height: 2),
         SizedBox(
-          height: 28,
-          child: TextField(
-            readOnly: readOnly,
-            controller: TextEditingController(text: value.toStringAsFixed(1).replaceAll('.0', '')),
-            style: TextStyle(color: readOnly ? Colors.white38 : Colors.white, fontSize: 12),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-            decoration: InputDecoration(
-              filled: readOnly,
-              fillColor: const Color(0xFF161616),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-              enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.white12)),
-              focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: Colors.blueAccent)),
-            ),
-            onSubmitted: (str) {
-              final parsed = double.tryParse(str);
-              if (parsed != null) onChanged(parsed);
-            },
-          ),
+          width: 58,
+          child: Text(label, style: const TextStyle(color: StudioTheme.textSecondary, fontSize: 11)),
         ),
-      ],
-    );
-  }
-
-  Widget _sliderRow(String label, double value, double min, double max, void Function(double) onChanged) {
-    return Row(
-      children: [
-        SizedBox(width: 50, child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11))),
         Expanded(
-          child: Slider(
-            value: value.clamp(min, max),
-            min: min,
-            max: max,
-            activeColor: Colors.blueAccent,
-            onChanged: onChanged,
+          child: SliderTheme(
+            data: SliderTheme.of(context).copyWith(
+              activeTrackColor: StudioTheme.accentCyan,
+              inactiveTrackColor: StudioTheme.obsidianBorder,
+              thumbColor: StudioTheme.accentAmber,
+              overlayColor: StudioTheme.accentAmber.withValues(alpha: 0.15),
+              trackHeight: 3.0,
+            ),
+            child: Slider(
+              value: value.clamp(min, safeMax),
+              min: min,
+              max: safeMax,
+              onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
+            ),
           ),
         ),
         SizedBox(
           width: 32,
           child: Text(
             value.toStringAsFixed(0),
-            style: const TextStyle(color: Colors.white70, fontSize: 11),
+            style: const TextStyle(
+              color: StudioTheme.textPrimary,
+              fontSize: 11,
+              fontFamily: 'monospace',
+              fontWeight: FontWeight.w700,
+            ),
             textAlign: TextAlign.right,
           ),
         ),
@@ -490,9 +751,14 @@ class PropertiesPanel extends StatelessWidget {
 
     return Row(
       children: [
-        SizedBox(width: 60, child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+        SizedBox(
+          width: 64,
+          child: Text(label, style: const TextStyle(color: StudioTheme.textSecondary, fontSize: 12)),
+        ),
         Checkbox(
           value: enabled,
+          activeColor: StudioTheme.accentCyan,
+          checkColor: StudioTheme.obsidianVoid,
           onChanged: (val) => onToggle(val ?? false),
           visualDensity: VisualDensity.compact,
         ),
@@ -510,26 +776,125 @@ class PropertiesPanel extends StatelessWidget {
                 }
               : null,
           child: Container(
-            width: 36,
-            height: 22,
+            width: 48,
+            height: 24,
             decoration: BoxDecoration(
-              color: enabled ? uiColor : Colors.white10,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white24),
+              color: enabled ? uiColor : StudioTheme.obsidianVoid,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                color: enabled ? StudioTheme.accentCyan : StudioTheme.obsidianBorder,
+                width: 1.2,
+              ),
             ),
           ),
         ),
+        if (enabled && color != null) ...[
+          const SizedBox(width: 8),
+          Text(
+            color.toHexRgb().toUpperCase(),
+            style: const TextStyle(
+              color: StudioTheme.textSecondary,
+              fontSize: 11,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
       ],
     );
   }
 
   Widget _actionButton(IconData icon, String label, VoidCallback onPressed) {
     return ActionChip(
-      avatar: Icon(icon, size: 14, color: Colors.white70),
-      label: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-      backgroundColor: const Color(0xFF282828),
+      avatar: Icon(icon, size: 14, color: StudioTheme.accentCyanBright),
+      label: Text(label, style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 11)),
+      backgroundColor: StudioTheme.obsidianElevated,
+      side: const BorderSide(color: StudioTheme.obsidianBorder),
       onPressed: onPressed,
       visualDensity: VisualDensity.compact,
+    );
+  }
+}
+
+class _StatefulTextRow extends StatefulWidget {
+  const _StatefulTextRow({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onSubmitted,
+  });
+
+  final String label;
+  final String value;
+  final void Function(String) onSubmitted;
+
+  @override
+  State<_StatefulTextRow> createState() => _StatefulTextRowState();
+}
+
+class _StatefulTextRowState extends State<_StatefulTextRow> {
+  late final TextEditingController _ctrl;
+  late final FocusNode _focus;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.value);
+    _focus = FocusNode();
+    _focus.addListener(() {
+      if (!_focus.hasFocus && _ctrl.text != widget.value) {
+        widget.onSubmitted(_ctrl.text);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant _StatefulTextRow oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_focus.hasFocus && oldWidget.value != widget.value) {
+      _ctrl.text = widget.value;
+    }
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        SizedBox(
+          width: 58,
+          child: Text(widget.label, style: const TextStyle(color: StudioTheme.textSecondary, fontSize: 12)),
+        ),
+        Expanded(
+          child: SizedBox(
+            height: 30,
+            child: TextField(
+              controller: _ctrl,
+              focusNode: _focus,
+              style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 12),
+              decoration: InputDecoration(
+                filled: true,
+                fillColor: StudioTheme.obsidianElevated,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: StudioTheme.obsidianBorder),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: const BorderSide(color: StudioTheme.accentCyanBright, width: 1.5),
+                ),
+              ),
+              onSubmitted: widget.onSubmitted,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -14,6 +14,7 @@ import 'editor_controller.dart';
 import 'editor_shortcuts.dart';
 import 'onboarding_guide_dialog.dart';
 import 'right_sidebar.dart';
+import 'theme/studio_theme.dart';
 import 'timeline_view.dart';
 
 class EditorScreen extends StatefulWidget {
@@ -439,6 +440,20 @@ class _EditorScreenState extends State<EditorScreen>
     );
   }
 
+  bool get _isTextInputFocused {
+    final focus = FocusManager.instance.primaryFocus;
+    if (focus == null || focus.context == null) return false;
+    bool insideEditable = false;
+    focus.context!.visitAncestorElements((element) {
+      if (element.widget is EditableText || element.widget is TextField) {
+        insideEditable = true;
+        return false;
+      }
+      return true;
+    });
+    return insideEditable || focus.context!.widget is EditableText;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Shortcuts(
@@ -455,22 +470,23 @@ class _EditorScreenState extends State<EditorScreen>
             onInvoke: (_) => _saveProject(),
           ),
           CopyIntent: CallbackAction<CopyIntent>(
-            onInvoke: (_) => _controller.copySelected(),
+            onInvoke: (_) => _isTextInputFocused ? null : _controller.copySelected(),
           ),
           PasteIntent: CallbackAction<PasteIntent>(
-            onInvoke: (_) => _controller.paste(),
+            onInvoke: (_) => _isTextInputFocused ? null : _controller.paste(),
           ),
           DuplicateIntent: CallbackAction<DuplicateIntent>(
-            onInvoke: (_) => _controller.duplicateSelected(),
+            onInvoke: (_) => _isTextInputFocused ? null : _controller.duplicateSelected(),
           ),
           DeleteSelectedIntent: CallbackAction<DeleteSelectedIntent>(
-            onInvoke: (_) => _controller.deleteSelected(),
+            onInvoke: (_) => _isTextInputFocused ? null : _controller.deleteSelected(),
           ),
           GroupIntent: CallbackAction<GroupIntent>(
-            onInvoke: (_) => _controller.groupSelected(),
+            onInvoke: (_) => _isTextInputFocused ? null : _controller.groupSelected(),
           ),
           SwitchToolIntent: CallbackAction<SwitchToolIntent>(
             onInvoke: (intent) {
+              if (_isTextInputFocused) return null;
               final tools = [
                 EditorTool.select,
                 EditorTool.nodeEdit,
@@ -488,6 +504,7 @@ class _EditorScreenState extends State<EditorScreen>
           ),
           NudgeIntent: CallbackAction<NudgeIntent>(
             onInvoke: (intent) {
+              if (_isTextInputFocused) return null;
               _controller.nudgeSelected(intent.dx, intent.dy);
               return null;
             },
@@ -501,36 +518,90 @@ class _EditorScreenState extends State<EditorScreen>
               if (!didPop) _handleBack();
             },
             child: Scaffold(
-              backgroundColor: const Color(0xFF2C2C2C),
+              backgroundColor: StudioTheme.obsidianVoid,
               appBar: AppBar(
                 leading: IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  icon: const Icon(Icons.arrow_back, size: 20),
                   tooltip: 'Back to Drawings',
                   onPressed: _handleBack,
                 ),
-                title: InkWell(
-                  onTap: _promptRenameDocument,
-                  borderRadius: BorderRadius.circular(4),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Flexible(
-                          child: Text(
-                            _controller.documentName,
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                            overflow: TextOverflow.ellipsis,
+                title: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(
+                      child: InkWell(
+                        onTap: _promptRenameDocument,
+                        borderRadius: BorderRadius.circular(6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  _controller.documentName,
+                                  style: const TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: StudioTheme.textPrimary,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              const Icon(Icons.edit, size: 12, color: StudioTheme.accentCyanBright),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 4),
-                        const Icon(Icons.edit, size: 12, color: Colors.white38),
-                      ],
+                      ),
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    // Live Isolate Auto-Save Status Pill
+                    ValueListenableBuilder<AutoSaveStatus>(
+                      valueListenable: _autoSaveService.statusNotifier,
+                      builder: (context, status, _) {
+                        if (status == AutoSaveStatus.idle) return const SizedBox.shrink();
+                        final (label, color) = switch (status) {
+                          AutoSaveStatus.saving => ('SAVING', StudioTheme.accentAmber),
+                          AutoSaveStatus.saved => ('SAVED', StudioTheme.accentCyanBright),
+                          AutoSaveStatus.error => ('SAVE ERR', StudioTheme.dangerCrimson),
+                          AutoSaveStatus.idle => ('', StudioTheme.textMuted),
+                        };
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: StudioTheme.obsidianElevated,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: color.withValues(alpha: 0.6)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 5,
+                                height: 5,
+                                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ],
                 ),
-                backgroundColor: const Color(0xFF1E1E1E),
-                foregroundColor: Colors.white,
+                backgroundColor: StudioTheme.obsidianSurface,
+                foregroundColor: StudioTheme.textPrimary,
+                shape: const Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
                 actions: [
                   ListenableBuilder(
                     listenable: _controller,
@@ -538,31 +609,31 @@ class _EditorScreenState extends State<EditorScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(Icons.undo),
-                          tooltip: 'Undo',
+                          icon: const Icon(Icons.undo, size: 20),
+                          tooltip: 'Undo (2-finger tap)',
                           onPressed: _controller.canUndo ? _controller.undo : null,
                         ),
                         IconButton(
-                          icon: const Icon(Icons.redo),
-                          tooltip: 'Redo',
+                          icon: const Icon(Icons.redo, size: 20),
+                          tooltip: 'Redo (3-finger tap)',
                           onPressed: _controller.canRedo ? _controller.redo : null,
                         ),
                       ],
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.save),
+                    icon: const Icon(Icons.save_outlined, size: 20),
                     tooltip: 'Save Project (.svgb)',
                     onPressed: _saveProject,
                   ),
                   IconButton(
-                    icon: const Icon(Icons.share),
+                    icon: const Icon(Icons.share_outlined, size: 20, color: StudioTheme.accentCyanBright),
                     tooltip: 'Share Drawing',
                     onPressed: _shareDocument,
                   ),
                   PopupMenuButton<String>(
                     tooltip: 'Export Options',
-                    icon: const Icon(Icons.file_download),
+                    icon: const Icon(Icons.file_download_outlined, color: StudioTheme.accentAmber),
                     onSelected: (val) {
                       if (val == 'svg_file') {
                         _exportSvg();
@@ -579,7 +650,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'svg_file',
                         child: Row(
                           children: [
-                            Icon(Icons.image_outlined, size: 20),
+                            Icon(Icons.image_outlined, size: 18, color: StudioTheme.accentCyanBright),
                             SizedBox(width: 8),
                             Text('Export SVG file'),
                           ],
@@ -589,7 +660,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'png_file',
                         child: Row(
                           children: [
-                            Icon(Icons.photo, size: 20),
+                            Icon(Icons.photo_outlined, size: 18, color: StudioTheme.accentCyanBright),
                             SizedBox(width: 8),
                             Text('Export PNG image...'),
                           ],
@@ -599,7 +670,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'lottie_file',
                         child: Row(
                           children: [
-                            Icon(Icons.animation, size: 20, color: Colors.orangeAccent),
+                            Icon(Icons.animation, size: 18, color: StudioTheme.accentAmber),
                             SizedBox(width: 8),
                             Text('Export Lottie JSON'),
                           ],
@@ -609,7 +680,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'svg_code',
                         child: Row(
                           children: [
-                            Icon(Icons.code, size: 20),
+                            Icon(Icons.code, size: 18, color: StudioTheme.textSecondary),
                             SizedBox(width: 8),
                             Text('View SVG code'),
                           ],
@@ -619,7 +690,7 @@ class _EditorScreenState extends State<EditorScreen>
                   ),
                   PopupMenuButton<String>(
                     tooltip: 'More Options',
-                    icon: const Icon(Icons.more_vert),
+                    icon: const Icon(Icons.more_vert, size: 20),
                     onSelected: (val) {
                       if (val == 'open_file') {
                         _openFile();
@@ -632,7 +703,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'open_file',
                         child: Row(
                           children: [
-                            Icon(Icons.folder_open, size: 20),
+                            Icon(Icons.folder_open, size: 18),
                             SizedBox(width: 8),
                             Text('Open File...'),
                           ],
@@ -642,7 +713,7 @@ class _EditorScreenState extends State<EditorScreen>
                         value: 'guide',
                         child: Row(
                           children: [
-                            Icon(Icons.help_outline, size: 20, color: Colors.blueAccent),
+                            Icon(Icons.help_outline, size: 18, color: StudioTheme.accentCyanBright),
                             SizedBox(width: 8),
                             Text('Tablet Gestures Guide'),
                           ],
@@ -671,7 +742,7 @@ class _EditorScreenState extends State<EditorScreen>
                   IconButton(
                     icon: Icon(
                       Icons.view_sidebar_outlined,
-                      color: _showSidebar ? Colors.blueAccent : Colors.white70,
+                      color: _showSidebar ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
                     ),
                     tooltip: 'Toggle Sidebar (Layers & Properties)',
                     onPressed: () {
@@ -742,16 +813,19 @@ class _EditorScreenState extends State<EditorScreen>
       listenable: _controller,
       builder: (context, _) {
         return Container(
-          width: 64,
-          color: const Color(0xFF212121),
+          width: 66,
+          decoration: const BoxDecoration(
+            color: StudioTheme.obsidianSurface,
+            border: Border(right: BorderSide(color: StudioTheme.obsidianBorder)),
+          ),
           child: SingleChildScrollView(
             child: Column(
               children: [
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 _toolButton(
                   icon: Icons.near_me_outlined,
                   tool: EditorTool.select,
-                  tooltip: 'Select / Move (V)',
+                  tooltip: 'Select / Marquee Move (V)',
                 ),
                 _toolButton(
                   icon: Icons.timeline,
@@ -783,12 +857,13 @@ class _EditorScreenState extends State<EditorScreen>
                   tool: EditorTool.text,
                   tooltip: 'Text Label (T)',
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
+                // Pen-only vs Touch Inking toggle
                 IconButton(
                   icon: Icon(
                     _controller.penOnlyMode ? Icons.draw : Icons.touch_app,
-                    color: _controller.penOnlyMode ? Colors.blueAccent : Colors.white70,
-                    size: 20,
+                    color: _controller.penOnlyMode ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
+                    size: 19,
                   ),
                   tooltip: _controller.penOnlyMode
                       ? 'Pen-only Mode ON (Fingers navigate, stylus draws)'
@@ -807,7 +882,36 @@ class _EditorScreenState extends State<EditorScreen>
                     );
                   },
                 ),
-                const Divider(color: Colors.white24, height: 24),
+                // Brush size quick scrubber badge
+                GestureDetector(
+                  onVerticalDragUpdate: (details) {
+                    setState(() {
+                      _controller.brushSize = (_controller.brushSize - details.delta.dy * 0.25).clamp(1.0, 64.0);
+                    });
+                  },
+                  child: Tooltip(
+                    message: 'Brush Size: ${_controller.brushSize.toInt()}px (Drag vertically to adjust)',
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: StudioTheme.obsidianElevated,
+                        borderRadius: BorderRadius.circular(5),
+                        border: Border.all(color: StudioTheme.obsidianBorder),
+                      ),
+                      child: Text(
+                        '${_controller.brushSize.toInt()}px',
+                        style: const TextStyle(
+                          color: StudioTheme.accentAmberBright,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(color: StudioTheme.obsidianBorder, height: 18),
                 ..._colorSwatches(),
                 const SizedBox(height: 12),
               ],
@@ -825,15 +929,27 @@ class _EditorScreenState extends State<EditorScreen>
   }) {
     final isSelected = _controller.currentTool == tool;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: IconButton(
-        icon: Icon(icon),
-        tooltip: tooltip,
-        color: isSelected ? Colors.blueAccent : Colors.white70,
-        style: IconButton.styleFrom(
-          backgroundColor: isSelected ? Colors.blueAccent.withValues(alpha: 0.2) : null,
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: InkWell(
+        onTap: () => _controller.currentTool = tool,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 44,
+          height: 40,
+          decoration: BoxDecoration(
+            color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSelected ? StudioTheme.accentAmber : Colors.transparent,
+              width: 1.5,
+            ),
+          ),
+          child: Icon(
+            icon,
+            size: 20,
+            color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
+          ),
         ),
-        onPressed: () => _controller.currentTool = tool,
       ),
     );
   }
@@ -841,10 +957,10 @@ class _EditorScreenState extends State<EditorScreen>
   List<Widget> _colorSwatches() {
     final colors = [
       const RgbaColor(0xFF000000),
-      const RgbaColor(0xFFE53935),
-      const RgbaColor(0xFF1E88E5),
-      const RgbaColor(0xFF43A047),
-      const RgbaColor(0xFFFB8C00),
+      const RgbaColor(0xFFEF4444),
+      const RgbaColor(0xFF06B6D4),
+      const RgbaColor(0xFF10B981),
+      const RgbaColor(0xFFF59E0B),
     ];
 
     final widgets = <Widget>[];
@@ -859,15 +975,15 @@ class _EditorScreenState extends State<EditorScreen>
             });
           },
           child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 6),
-            width: 28,
-            height: 28,
+            margin: const EdgeInsets.symmetric(vertical: 5),
+            width: 26,
+            height: 26,
             decoration: BoxDecoration(
               color: Color(c.value),
               shape: BoxShape.circle,
               border: Border.all(
-                color: isSelected ? Colors.white : Colors.white24,
-                width: isSelected ? 2.5 : 1.0,
+                color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.obsidianBorderBright,
+                width: isSelected ? 2.5 : 1.2,
               ),
             ),
           ),
@@ -880,9 +996,9 @@ class _EditorScreenState extends State<EditorScreen>
       Padding(
         padding: const EdgeInsets.only(top: 4),
         child: IconButton(
-          icon: const Icon(Icons.colorize, size: 20),
+          icon: const Icon(Icons.colorize, size: 19),
           tooltip: 'Custom Color (HSV Picker)',
-          color: Colors.white70,
+          color: StudioTheme.accentCyanBright,
           onPressed: () async {
             final picked = await ColorPickerDialog.show(
               context,

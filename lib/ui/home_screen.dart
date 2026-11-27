@@ -1,12 +1,34 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../core/core.dart';
+import '../render/document_painter.dart';
+import '../services/compute_isolate_service.dart';
 import '../services/database/database.dart';
 import '../services/file_storage_service.dart';
 import 'editor_screen.dart';
 import 'onboarding_guide_dialog.dart';
+import 'theme/studio_theme.dart';
+
+/// Studio preset artboard template for "+ New Drawing".
+class ArtboardPreset {
+  const ArtboardPreset({
+    required this.title,
+    required this.subtitle,
+    required this.width,
+    required this.height,
+    required this.icon,
+  });
+
+  final String title;
+  final String subtitle;
+  final double width;
+  final double height;
+  final IconData icon;
+}
 
 /// Project grid browser (Home screen) managing local projects and drafts.
+///
+/// Decodes project summaries in a background Isolate (`ComputeIsolateService`)
+/// and renders live miniature vector artboard thumbnails on each project card.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, this.database});
 
@@ -21,6 +43,38 @@ class _HomeScreenState extends State<HomeScreen> {
   String _searchQuery = '';
   bool _isLoading = true;
   List<Project> _projects = [];
+  Map<String, DocumentMetadataSummary> _summaries = {};
+
+  static const List<ArtboardPreset> _presets = [
+    ArtboardPreset(
+      title: 'Tablet Landscape (4:3)',
+      subtitle: '1024 × 768 px',
+      width: 1024,
+      height: 768,
+      icon: Icons.tablet_android,
+    ),
+    ArtboardPreset(
+      title: 'Full HD Animation (16:9)',
+      subtitle: '1920 × 1080 px',
+      width: 1920,
+      height: 1080,
+      icon: Icons.movie_creation_outlined,
+    ),
+    ArtboardPreset(
+      title: 'Square Sticker / Icon (1:1)',
+      subtitle: '1080 × 1080 px',
+      width: 1080,
+      height: 1080,
+      icon: Icons.crop_square,
+    ),
+    ArtboardPreset(
+      title: 'Social Story / Vertical (9:16)',
+      subtitle: '1080 × 1920 px',
+      width: 1080,
+      height: 1920,
+      icon: Icons.stay_current_portrait,
+    ),
+  ];
 
   @override
   void initState() {
@@ -41,9 +95,15 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() => _isLoading = true);
     try {
       final list = await _database.getAllProjects();
+      final rawMap = <String, String>{
+        for (final p in list) p.id: p.jsonContent,
+      };
+      // Decode all project metadata & live vector thumbnail documents in a background Isolate!
+      final summaries = await ComputeIsolateService.decodeProjectSummariesAsync(rawMap);
       if (mounted) {
         setState(() {
           _projects = list;
+          _summaries = summaries;
           _isLoading = false;
         });
       }
@@ -54,20 +114,20 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _createNewProject() async {
+  Future<void> _createNewProject({double width = 1024, double height = 768, String title = 'Untitled Drawing'}) async {
     final newId = 'proj_${DateTime.now().millisecondsSinceEpoch}';
     final defaultDoc = Document(
-      width: 1024,
-      height: 768,
+      width: width,
+      height: height,
       background: const RgbaColor(0xFFFFFFFF),
     ).insertNode(
       const GroupNode(id: 'layer_1', name: 'Layer 1'),
     );
-    final json = ProjectFormat.encode(defaultDoc);
+    final json = await ComputeIsolateService.encodeProjectAsync(defaultDoc);
 
     await _database.saveDraft(
       projectId: newId,
-      name: 'Untitled Drawing',
+      name: title,
       jsonContent: json,
     );
 
@@ -86,12 +146,102 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _showPresetPicker() async {
+    final selected = await showDialog<ArtboardPreset>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.add_box_outlined, color: StudioTheme.accentAmber, size: 20),
+            SizedBox(width: 8),
+            Text(
+              'Choose Artboard Preset',
+              style: TextStyle(color: StudioTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final preset in _presets)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    onTap: () => Navigator.pop(context, preset),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: StudioTheme.obsidianSurface,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: StudioTheme.obsidianBorder),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: StudioTheme.accentCyanSurface,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Icon(preset.icon, color: StudioTheme.accentCyanBright, size: 20),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  preset.title,
+                                  style: const TextStyle(
+                                    color: StudioTheme.textPrimary,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  preset.subtitle,
+                                  style: const TextStyle(
+                                    color: StudioTheme.textSecondary,
+                                    fontSize: 11,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right, color: StudioTheme.accentAmber, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
+          ),
+        ],
+      ),
+    );
+
+    if (selected != null) {
+      await _createNewProject(width: selected.width, height: selected.height);
+    }
+  }
+
   Future<void> _importFile() async {
     try {
       final doc = await FileStorageService.openProjectOrSvg();
       if (doc != null && mounted) {
         final newId = 'proj_${DateTime.now().millisecondsSinceEpoch}';
-        final json = ProjectFormat.encode(doc);
+        final json = await ComputeIsolateService.encodeProjectAsync(doc);
         await _database.saveDraft(
           projectId: newId,
           name: 'Imported Drawing',
@@ -144,26 +294,28 @@ class _HomeScreenState extends State<HomeScreen> {
     final newName = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF252525),
-        title: const Text('Rename Project', style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Text('Rename Project', style: TextStyle(color: StudioTheme.textPrimary, fontSize: 16)),
         content: TextField(
           controller: ctrl,
           autofocus: true,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: StudioTheme.textPrimary),
           decoration: const InputDecoration(
             hintText: 'Project Name',
-            hintStyle: TextStyle(color: Colors.white38),
+            hintStyle: TextStyle(color: StudioTheme.textMuted),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: StudioTheme.accentCyan,
+              foregroundColor: StudioTheme.obsidianVoid,
+            ),
             onPressed: () => Navigator.pop(context, ctrl.text.trim()),
-            child: const Text('Rename', style: TextStyle(color: Colors.white)),
+            child: const Text('Rename', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -179,21 +331,20 @@ class _HomeScreenState extends State<HomeScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF252525),
-        title: const Text('Delete Project?', style: TextStyle(color: Colors.white, fontSize: 16)),
+        title: const Text('Delete Project?', style: TextStyle(color: StudioTheme.textPrimary, fontSize: 16)),
         content: Text(
           'Are you sure you want to delete "${project.name}"? This cannot be undone.',
-          style: const TextStyle(color: Colors.white70),
+          style: const TextStyle(color: StudioTheme.textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: StudioTheme.dangerCrimson),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+            child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -213,25 +364,45 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF181818),
+      backgroundColor: StudioTheme.obsidianVoid,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1E1E1E),
-        foregroundColor: Colors.white,
+        backgroundColor: StudioTheme.obsidianSurface,
+        foregroundColor: StudioTheme.textPrimary,
         elevation: 0,
+        shape: const Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
         title: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
-                color: Colors.blueAccent.withValues(alpha: 0.2),
+                color: StudioTheme.accentCyanSurface,
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: StudioTheme.accentCyan),
               ),
-              child: const Icon(Icons.draw, color: Colors.blueAccent, size: 20),
+              child: const Icon(Icons.draw, color: StudioTheme.accentCyanBright, size: 20),
             ),
             const SizedBox(width: 10),
             const Text(
               'SVG Builder',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: 0.3),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: StudioTheme.accentAmberSurface,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: StudioTheme.accentAmber),
+              ),
+              child: const Text(
+                'PRO STUDIO',
+                style: TextStyle(
+                  color: StudioTheme.accentAmberBright,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                ),
+              ),
             ),
           ],
         ),
@@ -241,53 +412,74 @@ class _HomeScreenState extends State<HomeScreen> {
             width: 220,
             height: 36,
             child: TextField(
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 13),
               decoration: InputDecoration(
                 filled: true,
-                fillColor: const Color(0xFF2A2A2A),
+                fillColor: StudioTheme.obsidianElevated,
                 hintText: 'Search drawings...',
-                hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
-                prefixIcon: const Icon(Icons.search, size: 16, color: Colors.white38),
+                hintStyle: const TextStyle(color: StudioTheme.textMuted, fontSize: 12),
+                prefixIcon: const Icon(Icons.search, size: 16, color: StudioTheme.accentCyan),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                border: OutlineInputBorder(
+                enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
+                  borderSide: const BorderSide(color: StudioTheme.obsidianBorder),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: StudioTheme.accentCyanBright, width: 1.5),
                 ),
               ),
               onChanged: (val) => setState(() => _searchQuery = val),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           // Import button
           IconButton(
-            icon: const Icon(Icons.folder_open, color: Colors.white70),
+            icon: const Icon(Icons.folder_open, color: StudioTheme.textSecondary),
             tooltip: 'Import SVG or .svgb',
             onPressed: _importFile,
           ),
           // Tablet Gestures Onboarding Guide
           IconButton(
-            icon: const Icon(Icons.help_outline, color: Colors.white70),
+            icon: const Icon(Icons.help_outline, color: StudioTheme.accentCyanBright),
             tooltip: 'Tablet Gestures Guide',
             onPressed: () => OnboardingGuideDialog.show(context),
           ),
+          const SizedBox(width: 6),
+          // Presets dropdown button
+          OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: StudioTheme.accentCyanBright,
+              side: const BorderSide(color: StudioTheme.accentCyan),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
+            label: const Text('Presets', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+            onPressed: _showPresetPicker,
+          ),
           const SizedBox(width: 8),
-          // New Drawing Button
+          // Shining Offset Color (Electric Amber-Gold) Primary CTA Button!
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueAccent,
-              foregroundColor: Colors.white,
+              backgroundColor: StudioTheme.accentAmber,
+              foregroundColor: StudioTheme.obsidianVoid,
+              elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             ),
             icon: const Icon(Icons.add, size: 18),
-            label: const Text('New Drawing', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-            onPressed: _createNewProject,
+            label: const Text(
+              'New Drawing',
+              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
+            ),
+            onPressed: () => _createNewProject(),
           ),
           const SizedBox(width: 16),
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.blueAccent))
+          ? const Center(child: CircularProgressIndicator(color: StudioTheme.accentAmber))
           : filtered.isEmpty
               ? _buildEmptyState()
               : _buildProjectGrid(filtered),
@@ -302,31 +494,33 @@ class _HomeScreenState extends State<HomeScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.05),
+              color: StudioTheme.obsidianSurface,
               shape: BoxShape.circle,
+              border: Border.all(color: StudioTheme.obsidianBorder, width: 1.5),
             ),
-            child: const Icon(Icons.draw_outlined, size: 64, color: Colors.white24),
+            child: const Icon(Icons.draw_outlined, size: 60, color: StudioTheme.accentCyan),
           ),
           const SizedBox(height: 18),
           const Text(
             'No drawings found',
-            style: TextStyle(color: Colors.white70, fontSize: 18, fontWeight: FontWeight.bold),
+            style: TextStyle(color: StudioTheme.textPrimary, fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 8),
           const Text(
             'Create a new project or import an SVG file to start drawing with your S Pen.',
-            style: TextStyle(color: Colors.white38, fontSize: 13),
+            style: TextStyle(color: StudioTheme.textSecondary, fontSize: 13),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 22),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueAccent,
-              foregroundColor: Colors.white,
+              backgroundColor: StudioTheme.accentAmber,
+              foregroundColor: StudioTheme.obsidianVoid,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             ),
             icon: const Icon(Icons.add),
-            label: const Text('Create First Drawing'),
-            onPressed: _createNewProject,
+            label: const Text('Create First Drawing', style: TextStyle(fontWeight: FontWeight.w900)),
+            onPressed: () => _createNewProject(),
           ),
         ],
       ),
@@ -336,7 +530,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildProjectGrid(List<Project> projects) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        // Responsive columns based on tablet width
         final cols = constraints.maxWidth > 1100 ? 4 : (constraints.maxWidth > 750 ? 3 : 2);
 
         return GridView.builder(
@@ -358,61 +551,71 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildProjectCard(Project project) {
-    // Parse document metadata safely
-    double docW = 1024;
-    double docH = 768;
-    int elementCount = 0;
-    try {
-      final map = jsonDecode(project.jsonContent) as Map<String, dynamic>;
-      docW = (map['width'] as num?)?.toDouble() ?? 1024;
-      docH = (map['height'] as num?)?.toDouble() ?? 768;
-      final root = map['root'] as Map<String, dynamic>?;
-      final children = root?['children'] as List<dynamic>?;
-      elementCount = children?.length ?? 0;
-    } catch (_) {}
-
+    final summary = _summaries[project.id];
+    final docW = summary?.width ?? 1024.0;
+    final docH = summary?.height ?? 768.0;
+    final elementCount = summary?.elementCount ?? 0;
+    final previewDoc = summary?.document;
     final updatedStr = _formatTimestamp(project.updatedAt);
 
     return InkWell(
       onTap: () => _openProject(project),
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(10),
       child: Container(
         decoration: BoxDecoration(
-          color: const Color(0xFF222222),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
-          boxShadow: const [
-            BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2)),
-          ],
+          color: StudioTheme.obsidianSurface,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: StudioTheme.obsidianBorder),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Preview / Thumbnail area
+            // Live Vector Miniature Artboard Preview Area
             Expanded(
               child: Container(
                 decoration: const BoxDecoration(
-                  color: Color(0xFF141414),
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+                  color: StudioTheme.obsidianVoid,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(9)),
                 ),
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Canvas aspect ratio representation
-                    AspectRatio(
-                      aspectRatio: (docW / docH).clamp(0.5, 2.0),
-                      child: Container(
-                        margin: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF282828),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.white10),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black45, blurRadius: 6),
-                          ],
-                        ),
-                        child: Center(
-                          child: Icon(Icons.gesture, size: 28, color: Colors.white.withValues(alpha: 0.15)),
+                    Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: AspectRatio(
+                        aspectRatio: (docW / docH).clamp(0.5, 2.0),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: previewDoc?.background != null
+                                ? Color(previewDoc!.background!.value)
+                                : Colors.white,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: StudioTheme.obsidianBorderBright),
+                          ),
+                          clipBehavior: Clip.hardEdge,
+                          child: previewDoc != null && elementCount > 0
+                              ? FittedBox(
+                                  fit: BoxFit.contain,
+                                  child: SizedBox(
+                                    width: docW,
+                                    height: docH,
+                                    child: CustomPaint(
+                                      painter: DocumentPainter(
+                                        document: previewDoc,
+                                        showArtboardFrame: false,
+                                        drawSelectionHandles: false,
+                                        clipToArtboard: true,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : const Center(
+                                  child: Icon(
+                                    Icons.draw_outlined,
+                                    size: 26,
+                                    color: StudioTheme.textMuted,
+                                  ),
+                                ),
                         ),
                       ),
                     ),
@@ -424,12 +627,18 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.black87,
+                          color: StudioTheme.obsidianSurface,
                           borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: StudioTheme.obsidianBorder),
                         ),
                         child: Text(
                           '${docW.toInt()} × ${docH.toInt()}',
-                          style: const TextStyle(color: Colors.white60, fontSize: 10, fontFamily: 'monospace'),
+                          style: const TextStyle(
+                            color: StudioTheme.textSecondary,
+                            fontSize: 10,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
@@ -441,12 +650,25 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.black87,
+                          color: elementCount > 0
+                              ? StudioTheme.accentCyanSurface
+                              : StudioTheme.obsidianSurface,
                           borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: elementCount > 0
+                                ? StudioTheme.accentCyan
+                                : StudioTheme.obsidianBorder,
+                          ),
                         ),
                         child: Text(
-                          '$elementCount layers',
-                          style: const TextStyle(color: Colors.white60, fontSize: 10),
+                          '$elementCount elements',
+                          style: TextStyle(
+                            color: elementCount > 0
+                                ? StudioTheme.accentCyanBright
+                                : StudioTheme.textSecondary,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                     ),
@@ -458,6 +680,9 @@ class _HomeScreenState extends State<HomeScreen> {
             // Card Footer
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: const BoxDecoration(
+                border: Border(top: BorderSide(color: StudioTheme.obsidianBorder)),
+              ),
               child: Row(
                 children: [
                   Expanded(
@@ -467,9 +692,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         Text(
                           project.name,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: StudioTheme.textPrimary,
                             fontSize: 13,
-                            fontWeight: FontWeight.bold,
+                            fontWeight: FontWeight.w700,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -477,16 +702,15 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 2),
                         Text(
                           updatedStr,
-                          style: const TextStyle(color: Colors.white38, fontSize: 11),
+                          style: const TextStyle(color: StudioTheme.textMuted, fontSize: 11),
                         ),
                       ],
                     ),
                   ),
                   PopupMenuButton<String>(
-                    icon: const Icon(Icons.more_vert, size: 18, color: Colors.white60),
+                    icon: const Icon(Icons.more_vert, size: 18, color: StudioTheme.textSecondary),
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
-                    color: const Color(0xFF2C2C2C),
                     onSelected: (val) {
                       switch (val) {
                         case 'open':
@@ -503,7 +727,16 @@ class _HomeScreenState extends State<HomeScreen> {
                       const PopupMenuItem(value: 'open', child: Row(children: [Icon(Icons.edit, size: 15), SizedBox(width: 8), Text('Open')])),
                       const PopupMenuItem(value: 'duplicate', child: Row(children: [Icon(Icons.copy, size: 15), SizedBox(width: 8), Text('Duplicate')])),
                       const PopupMenuItem(value: 'rename', child: Row(children: [Icon(Icons.title, size: 15), SizedBox(width: 8), Text('Rename')])),
-                      const PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, size: 15, color: Colors.redAccent), SizedBox(width: 8), Text('Delete', style: TextStyle(color: Colors.redAccent))])),
+                      const PopupMenuItem(
+                        value: 'delete',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete, size: 15, color: StudioTheme.dangerCrimson),
+                            SizedBox(width: 8),
+                            Text('Delete', style: TextStyle(color: StudioTheme.dangerCrimson)),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
                 ],

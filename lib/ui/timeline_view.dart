@@ -1,11 +1,13 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart' hide Easing;
 import '../core/core.dart';
 import 'easing_picker_dialog.dart';
 import 'editor_controller.dart';
+import 'theme/studio_theme.dart';
 import 'timeline_settings_dialog.dart';
 
 /// Comprehensive multi-track animation timeline with keyframe dragging, frame snapping,
-/// easing curve inspection, and collapsible tablet layout.
+/// onion skinning, horizontal timeline zoom, easing curve inspection, and collapsible tablet layout.
 class TimelineView extends StatefulWidget {
   const TimelineView({
     super.key,
@@ -27,11 +29,21 @@ class _TimelineViewState extends State<TimelineView> {
   // Dragging keyframe state
   SelectedKeyframe? _draggingKeyframe;
   double? _dragInitialTime;
+  final ScrollController _horizontalScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: controller,
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        controller,
+        controller.playheadNotifier,
+      ]),
       builder: (context, _) {
         final isCollapsed = controller.isTimelineCollapsed;
 
@@ -40,8 +52,8 @@ class _TimelineViewState extends State<TimelineView> {
           curve: Curves.easeInOut,
           height: isCollapsed ? 42.0 : 230.0,
           decoration: const BoxDecoration(
-            color: Color(0xFF181818),
-            border: Border(top: BorderSide(color: Color(0xFF2E2E2E))),
+            color: StudioTheme.obsidianVoid,
+            border: Border(top: BorderSide(color: StudioTheme.obsidianBorder)),
           ),
           child: Column(
             children: [
@@ -50,13 +62,13 @@ class _TimelineViewState extends State<TimelineView> {
 
               // 2. Expanded Multi-Track Timeline
               if (!isCollapsed) ...[
-                const Divider(color: Color(0xFF2C2C2C), height: 1),
+                const Divider(color: StudioTheme.obsidianBorder, height: 1),
                 Expanded(
                   child: Row(
                     children: [
                       // Left Column: Track Headers
                       _buildTrackHeadersColumn(),
-                      const VerticalDivider(color: Color(0xFF2A2A2A), width: 1),
+                      const VerticalDivider(color: StudioTheme.obsidianBorder, width: 1),
                       // Right Column: Time Ruler & Keyframe Lanes
                       Expanded(
                         child: _buildTimelineLanesColumn(),
@@ -86,26 +98,26 @@ class _TimelineViewState extends State<TimelineView> {
     return Container(
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      color: const Color(0xFF1E1E1E),
+      color: StudioTheme.obsidianSurface,
       child: Row(
         children: [
           // Collapse / Expand toggle
           IconButton(
             icon: Icon(
               isCollapsed ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-              color: Colors.white70,
+              color: StudioTheme.textSecondary,
               size: 20,
             ),
             tooltip: isCollapsed ? 'Expand Timeline' : 'Collapse Timeline',
             onPressed: controller.toggleTimelineCollapsed,
           ),
-          const VerticalDivider(color: Colors.white12, width: 8, indent: 8, endIndent: 8),
+          const VerticalDivider(color: StudioTheme.obsidianBorder, width: 8, indent: 8, endIndent: 8),
 
           // Play / Pause
           IconButton(
             icon: Icon(
               controller.isPlaying ? Icons.pause : Icons.play_arrow,
-              color: controller.isPlaying ? Colors.amberAccent : Colors.white,
+              color: controller.isPlaying ? StudioTheme.accentAmberBright : StudioTheme.textPrimary,
               size: 22,
             ),
             tooltip: controller.isPlaying ? 'Pause (Space)' : 'Play (Space)',
@@ -113,7 +125,7 @@ class _TimelineViewState extends State<TimelineView> {
           ),
           // Stop & Rewind
           IconButton(
-            icon: const Icon(Icons.stop, color: Colors.white70, size: 20),
+            icon: const Icon(Icons.stop, color: StudioTheme.textSecondary, size: 20),
             tooltip: 'Stop & Rewind to 0s',
             onPressed: () {
               controller.pause();
@@ -122,13 +134,13 @@ class _TimelineViewState extends State<TimelineView> {
           ),
           // Jump Prev Keyframe
           IconButton(
-            icon: const Icon(Icons.skip_previous, color: Colors.white60, size: 18),
+            icon: const Icon(Icons.skip_previous, color: StudioTheme.textSecondary, size: 18),
             tooltip: 'Jump to Previous Keyframe',
             onPressed: controller.jumpToPrevKeyframe,
           ),
           // Jump Next Keyframe
           IconButton(
-            icon: const Icon(Icons.skip_next, color: Colors.white60, size: 18),
+            icon: const Icon(Icons.skip_next, color: StudioTheme.textSecondary, size: 18),
             tooltip: 'Jump to Next Keyframe',
             onPressed: controller.jumpToNextKeyframe,
           ),
@@ -139,29 +151,80 @@ class _TimelineViewState extends State<TimelineView> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFF121212),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: Colors.white12),
+              color: StudioTheme.obsidianVoid,
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(color: StudioTheme.obsidianBorder),
             ),
             child: Text(
               'F: $currentFrame / $totalFrames  (${currentTime.toStringAsFixed(2)}s / ${doc.duration.toStringAsFixed(1)}s)',
               style: const TextStyle(
-                color: Colors.white,
+                color: StudioTheme.accentCyanBright,
                 fontFamily: 'monospace',
                 fontSize: 11,
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ),
 
           const Spacer(),
 
+          // Onion Skinning Toggle
+          IconButton(
+            icon: Icon(
+              Icons.filter_none,
+              size: 16,
+              color: controller.onionSkinEnabled ? StudioTheme.accentAmberBright : StudioTheme.textMuted,
+            ),
+            tooltip: controller.onionSkinEnabled
+                ? 'Onion Skinning: ON (Prev/Next Ghost Frames)'
+                : 'Onion Skinning: OFF',
+            onPressed: controller.toggleOnionSkin,
+          ),
+
+          // Timeline Horizontal Zoom Pill
+          if (!isCollapsed) ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: StudioTheme.obsidianElevated,
+                borderRadius: BorderRadius.circular(5),
+                border: Border.all(color: StudioTheme.obsidianBorder),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    onTap: () => controller.setTimelineZoom(controller.timelineZoom - 0.5),
+                    child: const Icon(Icons.zoom_out, size: 14, color: StudioTheme.textSecondary),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 5),
+                    child: Text(
+                      '${controller.timelineZoom.toStringAsFixed(1)}x',
+                      style: const TextStyle(
+                        color: StudioTheme.textPrimary,
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => controller.setTimelineZoom(controller.timelineZoom + 0.5),
+                    child: const Icon(Icons.zoom_in, size: 14, color: StudioTheme.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+
           // Loop toggle
           IconButton(
             icon: Icon(
               Icons.repeat,
               size: 18,
-              color: controller.loopPlayback ? Colors.blueAccent : Colors.white24,
+              color: controller.loopPlayback ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
             ),
             tooltip: controller.loopPlayback ? 'Loop Playback: ON' : 'Loop Playback: OFF',
             onPressed: () {
@@ -176,7 +239,7 @@ class _TimelineViewState extends State<TimelineView> {
             icon: Icon(
               Icons.grid_on,
               size: 18,
-              color: controller.snapToFrames ? Colors.blueAccent : Colors.white24,
+              color: controller.snapToFrames ? StudioTheme.accentCyanBright : StudioTheme.textMuted,
             ),
             tooltip: controller.snapToFrames
                 ? 'Snap to Frames (${doc.fps.toInt()} FPS): ON'
@@ -190,7 +253,7 @@ class _TimelineViewState extends State<TimelineView> {
 
           // Timeline Settings button
           IconButton(
-            icon: const Icon(Icons.tune, color: Colors.white70, size: 18),
+            icon: const Icon(Icons.tune, color: StudioTheme.textSecondary, size: 18),
             tooltip: 'Timeline Settings (Duration & FPS)',
             onPressed: () => TimelineSettingsDialog.show(context, controller),
           ),
@@ -405,65 +468,73 @@ class _TimelineViewState extends State<TimelineView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final timelineWidth = constraints.maxWidth;
+        final viewportWidth = constraints.maxWidth;
+        final timelineWidth = math.max(viewportWidth, viewportWidth * controller.timelineZoom);
 
-        return Column(
-          children: [
-            // Time Ruler at Top (Height 24)
-            GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onHorizontalDragUpdate: (details) {
-                final ratio = (details.localPosition.dx / timelineWidth).clamp(0.0, 1.0);
-                controller.seek(ratio * duration);
-              },
-              onTapDown: (details) {
-                final ratio = (details.localPosition.dx / timelineWidth).clamp(0.0, 1.0);
-                controller.seek(ratio * duration);
-              },
-              child: SizedBox(
-                height: 24,
-                width: timelineWidth,
-                child: CustomPaint(
-                  painter: _TimelineRulerPainter(
-                    duration: duration,
-                    fps: doc.fps,
-                    currentTime: controller.currentTime,
-                  ),
-                ),
-              ),
-            ),
-            const Divider(color: Color(0xFF282828), height: 1),
-
-            // Scrollable Lanes
-            Expanded(
-              child: Stack(
-                children: [
-                  ListView(
-                    padding: EdgeInsets.zero,
-                    children: [
-                      // Summary lane
-                      _buildSummaryLane(timelineWidth, duration),
-                      // Property lanes
-                      for (final prop in animProps)
-                        _buildPropertyLane(selectedNode!, prop, timelineWidth, duration),
-                    ],
-                  ),
-
-                  // Overlay Vertical Playhead Line spanning all lanes
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: CustomPaint(
-                        painter: _PlayheadLinePainter(
-                          currentTime: controller.currentTime,
-                          duration: duration,
-                        ),
+        return SingleChildScrollView(
+          controller: _horizontalScrollController,
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: timelineWidth,
+            child: Column(
+              children: [
+                // Time Ruler at Top (Height 24)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: (details) {
+                    final ratio = (details.localPosition.dx / timelineWidth).clamp(0.0, 1.0);
+                    controller.seek(ratio * duration);
+                  },
+                  onTapDown: (details) {
+                    final ratio = (details.localPosition.dx / timelineWidth).clamp(0.0, 1.0);
+                    controller.seek(ratio * duration);
+                  },
+                  child: SizedBox(
+                    height: 24,
+                    width: timelineWidth,
+                    child: CustomPaint(
+                      painter: _TimelineRulerPainter(
+                        duration: duration,
+                        fps: doc.fps,
+                        currentTime: controller.currentTime,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+                const Divider(color: StudioTheme.obsidianBorder, height: 1),
+
+                // Scrollable Lanes
+                Expanded(
+                  child: Stack(
+                    children: [
+                      ListView(
+                        padding: EdgeInsets.zero,
+                        children: [
+                          // Summary lane
+                          _buildSummaryLane(timelineWidth, duration),
+                          // Property lanes
+                          for (final prop in animProps)
+                            _buildPropertyLane(selectedNode!, prop, timelineWidth, duration),
+                        ],
+                      ),
+
+                      // Overlay Vertical Playhead Line spanning all lanes
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: CustomPaint(
+                            painter: _PlayheadLinePainter(
+                              currentTime: controller.currentTime,
+                              duration: duration,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         );
       },
     );

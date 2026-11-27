@@ -2,9 +2,16 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 import '../core/core.dart';
 
+/// Zero-leak O(1) cache mapping immutable [PathData] instances to native [ui.Path] objects.
+/// Automatically garbage-collected when a [PathData] is no longer referenced.
+final Expando<ui.Path> _uiPathCache = Expando<ui.Path>('uiPathCache');
+
 /// Extension methods to convert core models to Flutter `dart:ui` equivalents.
 extension PathDataToFlutter on PathData {
   ui.Path toUiPath() {
+    final cached = _uiPathCache[this];
+    if (cached != null) return cached;
+
     final uiPath = ui.Path();
     for (final segment in segments) {
       switch (segment) {
@@ -20,6 +27,7 @@ extension PathDataToFlutter on PathData {
           uiPath.close();
       }
     }
+    _uiPathCache[this] = uiPath;
     return uiPath;
   }
 }

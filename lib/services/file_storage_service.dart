@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../core/core.dart';
 import '../render/document_painter.dart';
+import 'compute_isolate_service.dart';
 
 /// Service handling file open, save, SVG export, Lottie export, PNG rendering, and sharing.
 class FileStorageService {
@@ -16,7 +17,7 @@ class FileStorageService {
     return uri.isScheme('file') ? uri.toFilePath() : uri.toString();
   }
 
-  /// Opens an SVG file or `.svgb` project file and parses it into a [Document].
+  /// Opens an SVG file or `.svgb` project file and parses it into a [Document] on a background isolate.
   static Future<Document?> openProjectOrSvg() async {
     try {
       final files = await FilePicker.pickFiles(
@@ -32,9 +33,9 @@ class FileStorageService {
 
       final ext = file.extension?.toLowerCase();
       if (ext == 'svgb' || (ext == 'json' && content.contains('"format": "svgb"'))) {
-        return ProjectFormat.decode(content);
+        return await ComputeIsolateService.decodeProjectAsync(content);
       } else {
-        final importResult = importSvg(content);
+        final importResult = await ComputeIsolateService.importSvgAsync(content);
         return importResult.document;
       }
     } catch (e) {
@@ -43,10 +44,10 @@ class FileStorageService {
     }
   }
 
-  /// Saves the document in native `.svgb` format using system save file picker.
+  /// Saves the document in native `.svgb` format using background isolate encoding and system save file picker.
   static Future<String?> saveProjectFile(Document document, {String defaultName = 'project.svgb'}) async {
     try {
-      final jsonStr = ProjectFormat.encode(document, pretty: true);
+      final jsonStr = await ComputeIsolateService.encodeProjectAsync(document, pretty: true);
       final bytes = Uint8List.fromList(utf8.encode(jsonStr));
 
       final uri = await FilePicker.saveFile(
@@ -62,10 +63,10 @@ class FileStorageService {
     }
   }
 
-  /// Exports the rendered SVG file to disk.
+  /// Exports the rendered SVG file to disk via a background isolate.
   static Future<String?> exportSvgFile(Document document, {String defaultName = 'export.svg'}) async {
     try {
-      final svgStr = exportSvg(document);
+      final svgStr = await ComputeIsolateService.exportSvgAsync(document);
       final bytes = Uint8List.fromList(utf8.encode(svgStr));
 
       final uri = await FilePicker.saveFile(
@@ -81,10 +82,10 @@ class FileStorageService {
     }
   }
 
-  /// Exports document animation into Bodymovin / Lottie JSON format.
+  /// Exports document animation into Bodymovin / Lottie JSON format via a background isolate.
   static Future<String?> exportLottieFile(Document document, {String defaultName = 'animation.json'}) async {
     try {
-      final lottieStr = LottieExporter.export(document);
+      final lottieStr = await ComputeIsolateService.exportLottieAsync(document);
       final bytes = Uint8List.fromList(utf8.encode(lottieStr));
 
       final uri = await FilePicker.saveFile(

@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'ui/home_screen.dart';
+import 'ui/theme/studio_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -27,14 +28,7 @@ class SvgBuilderApp extends StatelessWidget {
     return MaterialApp(
       title: 'SVG Builder',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blueAccent,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      theme: StudioTheme.darkTheme,
       home: const HomeScreen(),
     );
   }

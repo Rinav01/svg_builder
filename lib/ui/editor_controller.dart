@@ -21,6 +21,33 @@ enum TransformMode {
   rotate,
 }
 
+/// Alignment options for selected nodes relative to the artboard or selection bounds.
+enum AlignmentTarget {
+  left,
+  centerHorizontal,
+  right,
+  top,
+  centerVertical,
+  bottom,
+}
+
+/// Represents a dynamic smart alignment guide line in document coordinates.
+class SmartGuide {
+  const SmartGuide({
+    required this.isVertical,
+    required this.position,
+    required this.start,
+    required this.end,
+    this.label,
+  });
+
+  final bool isVertical;
+  final double position;
+  final double start;
+  final double end;
+  final String? label;
+}
+
 /// Identifies an individual keyframe marker on a specific node track.
 class SelectedKeyframe {
   const SelectedKeyframe({
@@ -139,8 +166,29 @@ class EditorController extends ChangeNotifier {
   /// When true, finger touch navigates/pans/zooms/selects while the stylus draws.
   bool penOnlyMode = true;
 
+  /// Touch-friendly multi-selection toggle for tablets without hardware Shift key.
+  bool multiSelectMode = false;
+  void toggleMultiSelectMode() {
+    multiSelectMode = !multiSelectMode;
+    notifyListeners();
+  }
+
+  /// Dynamic smart alignment guides toggle.
+  bool smartGuidesEnabled = true;
+  List<SmartGuide> activeSmartGuides = const [];
+
+  /// Active rubber-band marquee selection rectangle in document coordinates.
+  Bounds? marqueeBounds;
+
   /// High-frequency notifier for active inking points, isolating canvas repaints from UI panels.
   final ValueNotifier<List<StrokeSample>> activeStrokeNotifier = ValueNotifier<List<StrokeSample>>([]);
+
+  /// Granular high-frequency playhead notifier so 60-120Hz animation playback
+  /// only repaints the canvas and timeline playhead without rebuilding Layers/Properties/AppBar.
+  final ValueNotifier<double> playheadNotifier = ValueNotifier<double>(0.0);
+
+  /// Granular playback state notifier.
+  final ValueNotifier<bool> isPlayingNotifier = ValueNotifier<bool>(false);
 
   // --- Active Drawing Gestures ---
   final List<StrokeSample> _activeStroke = [];
@@ -181,6 +229,23 @@ class EditorController extends ChangeNotifier {
   bool loopPlayback = true;
   bool snapToFrames = true;
   bool isTimelineCollapsed = false;
+
+  /// When enabled, ghost silhouettes of previous and next frames render on the canvas.
+  bool onionSkinEnabled = false;
+  void toggleOnionSkin() {
+    onionSkinEnabled = !onionSkinEnabled;
+    notifyListeners();
+  }
+
+  /// Horizontal timeline zoom factor (1.0x to 8.0x).
+  double timelineZoom = 1.0;
+  void setTimelineZoom(double zoom) {
+    final clamped = zoom.clamp(1.0, 8.0);
+    if ((timelineZoom - clamped).abs() > 1e-3) {
+      timelineZoom = clamped;
+      notifyListeners();
+    }
+  }
 
   void toggleTimelineCollapsed() {
     isTimelineCollapsed = !isTimelineCollapsed;
@@ -225,16 +290,22 @@ class EditorController extends ChangeNotifier {
         nextTime = nextTime % duration; // Loop playback
       } else {
         nextTime = duration;
+        _currentTime = nextTime;
+        playheadNotifier.value = nextTime;
         pause();
+        return;
       }
     }
     _currentTime = nextTime;
-    notifyListeners();
+    // Update only the isolated playheadNotifier during high-frequency ticks
+    // to avoid global widget rebuilds of sidebars and toolbars at 60-120Hz!
+    playheadNotifier.value = nextTime;
   }
 
   void play() {
     if (_isPlaying) return;
     _isPlaying = true;
+    isPlayingNotifier.value = true;
     _lastTick = Duration.zero;
     _ticker?.start();
     notifyListeners();
@@ -243,6 +314,7 @@ class EditorController extends ChangeNotifier {
   void pause() {
     if (!_isPlaying) return;
     _isPlaying = false;
+    isPlayingNotifier.value = false;
     _ticker?.stop();
     notifyListeners();
   }
@@ -257,6 +329,7 @@ class EditorController extends ChangeNotifier {
 
   void seek(double time) {
     _currentTime = snapTime(time);
+    playheadNotifier.value = _currentTime;
     notifyListeners();
   }
 
@@ -266,6 +339,23 @@ class EditorController extends ChangeNotifier {
       return document;
     }
     return evaluateAt(document, _currentTime);
+  }
+
+  /// Returns evaluated previous and next frame documents when [onionSkinEnabled] is true.
+  ({Document? prev, Document? next}) get onionSkinFrames {
+    if (!onionSkinEnabled || document.animations.isEmpty || document.fps <= 0) {
+      return (prev: null, next: null);
+    }
+    final step = 1.0 / document.fps;
+    final prevTime = (_currentTime - step * 3).clamp(0.0, document.duration);
+    final nextTime = (_currentTime + step * 3).clamp(0.0, document.duration);
+    final prevDoc = (prevTime - _currentTime).abs() > 1e-4
+        ? evaluateAt(document, prevTime)
+        : null;
+    final nextDoc = (nextTime - _currentTime).abs() > 1e-4
+        ? evaluateAt(document, nextTime)
+        : null;
+    return (prev: prevDoc, next: nextDoc);
   }
 
   // --- Keyframe Selection & Operations ---
@@ -752,7 +842,13 @@ class EditorController extends ChangeNotifier {
   }
 
   // --- Node Property Updaters ---
-  void updateNode(String nodeId, Node Function(Node) updater, {String label = 'Edit Property'}) {
+  void updateNode(
+    String nodeId,
+    Node Function(Node) updater, {
+    String label = 'Edit Property',
+    String? mergeKey,
+    bool merge = false,
+  }) {
     if (!document.contains(nodeId)) return;
     execute(
       UpdateNodeCommand.from(
@@ -760,9 +856,160 @@ class EditorController extends ChangeNotifier {
         nodeId,
         updater,
         label: label,
+        mergeKey: mergeKey,
       ),
-      merge: false,
+      merge: merge,
     );
+  }
+
+  /// Updates an animatable property on [nodeId], automatically recording a keyframe
+  /// if [currentTime] > 0 and the node already has an animation track for [property] (or any track).
+  void updateAnimatableProperty(
+    String nodeId,
+    AnimProperty property,
+    double value,
+    Node Function(Node) baseUpdater, {
+    String label = 'Edit Property',
+    String? mergeKey,
+    bool merge = false,
+  }) {
+    if (!document.contains(nodeId)) return;
+    final hasAnimations = document.animations.containsKey(nodeId);
+    if (_currentTime > 0 && hasAnimations) {
+      final cmd = SetTrackCommand.setKeyframe(
+        document,
+        nodeId,
+        property,
+        Keyframe(_currentTime, value),
+      );
+      execute(cmd, merge: merge);
+      return;
+    }
+    updateNode(
+      nodeId,
+      baseUpdater,
+      label: label,
+      mergeKey: mergeKey,
+      merge: merge,
+    );
+  }
+
+  /// Dynamically re-fits a freehand [PathNode] that retains raw stylus [samples]
+  /// with a new [newBrushSize], updating its vector outline non-destructively.
+  void reStyleStrokeWidth(String nodeId, double newBrushSize, {bool merge = true}) {
+    final node = document.findById(nodeId);
+    if (node is! PathNode || node.samples == null || node.samples!.isEmpty) return;
+
+    final newPath = strokeSamplesToPathData(
+      node.samples!,
+      size: newBrushSize.clamp(1.0, 96.0),
+    );
+    updateNode(
+      nodeId,
+      (n) => (n as PathNode).copyWith(path: newPath),
+      label: 'Resize Brush Stroke',
+      mergeKey: 'restyle-stroke-$nodeId',
+      merge: merge,
+    );
+  }
+
+  /// Aligns selected nodes relative to the artboard (if 1 node selected) or selection bounds (if 2+ selected).
+  void alignSelected(AlignmentTarget target) {
+    if (_selectedNodeIds.isEmpty) return;
+    final nodes = selectedNodes;
+    if (nodes.isEmpty) return;
+
+    // Compute reference bounding box in document coordinates
+    Bounds refBounds;
+    if (nodes.length == 1) {
+      refBounds = Bounds.fromLTWH(0, 0, document.width, document.height);
+    } else {
+      refBounds = Bounds.empty;
+      for (final n in nodes) {
+        final fullMatrix = concatTransforms(document.ancestry(n.id));
+        refBounds = refBounds.union(n.localBounds.transformed(fullMatrix));
+      }
+    }
+    if (refBounds.isEmpty) return;
+
+    final commands = <Command>[];
+    for (final n in nodes) {
+      final fullMatrix = concatTransforms(document.ancestry(n.id));
+      final worldBounds = n.localBounds.transformed(fullMatrix);
+      if (worldBounds.isEmpty) continue;
+
+      double dx = 0;
+      double dy = 0;
+      switch (target) {
+        case AlignmentTarget.left:
+          dx = refBounds.left - worldBounds.left;
+        case AlignmentTarget.centerHorizontal:
+          dx = refBounds.center.x - worldBounds.center.x;
+        case AlignmentTarget.right:
+          dx = refBounds.right - worldBounds.right;
+        case AlignmentTarget.top:
+          dy = refBounds.top - worldBounds.top;
+        case AlignmentTarget.centerVertical:
+          dy = refBounds.center.y - worldBounds.center.y;
+        case AlignmentTarget.bottom:
+          dy = refBounds.bottom - worldBounds.bottom;
+      }
+
+      if (dx.abs() > 1e-3 || dy.abs() > 1e-3) {
+        final t = n.transform;
+        commands.add(
+          UpdateNodeCommand.from(
+            document,
+            n.id,
+            (node) => node.withBase(
+              transform: t.copyWith(x: t.x + dx, y: t.y + dy),
+            ),
+            label: 'Align',
+          ),
+        );
+      }
+    }
+
+    if (commands.isNotEmpty) {
+      execute(BatchCommand('Align Elements', commands), merge: false);
+    }
+  }
+
+  // --- Marquee Rubber-Band Selection ---
+  void beginMarquee(Vec2 startDocPoint) {
+    marqueeBounds = Bounds.fromPoints([startDocPoint, startDocPoint]);
+    notifyListeners();
+  }
+
+  void updateMarquee(Vec2 startDocPoint, Vec2 currentDocPoint) {
+    marqueeBounds = Bounds.fromPoints([startDocPoint, currentDocPoint]);
+    notifyListeners();
+  }
+
+  void endMarquee({bool additive = false}) {
+    final rect = marqueeBounds;
+    marqueeBounds = null;
+    if (rect == null || (rect.width < 3 && rect.height < 3)) {
+      notifyListeners();
+      return;
+    }
+
+    if (!additive && !multiSelectMode) {
+      _selectedNodeIds.clear();
+    }
+
+    for (final node in document.walk()) {
+      if (node is GroupNode || !node.visible || node.locked) continue;
+      final ancestry = document.ancestry(node.id);
+      if (ancestry.any((a) => !a.visible || a.locked)) continue;
+
+      final fullMatrix = concatTransforms(ancestry);
+      final worldBounds = node.localBounds.transformed(fullMatrix);
+      if (!worldBounds.isEmpty && rect.intersects(worldBounds)) {
+        _selectedNodeIds.add(node.id);
+      }
+    }
+    notifyListeners();
   }
 
   void replaceNode(Node updatedNode, {String label = 'Edit Property'}) {
@@ -1134,6 +1381,8 @@ class EditorController extends ChangeNotifier {
   }
 
   // --- Interactive Transform Drag Handling ---
+  Node? _transformDragInitialNode;
+
   void beginTransformDrag(String nodeId, Vec2 startPoint, {HandleType? handle}) {
     final node = document.findById(nodeId);
     if (node == null) return;
@@ -1142,7 +1391,9 @@ class EditorController extends ChangeNotifier {
     transformDragStart = startPoint;
     transformDragInitial = node.transform;
     transformDragInitialBounds = node.localBounds;
+    _transformDragInitialNode = node;
     activeHandle = handle;
+    activeSmartGuides = const [];
 
     if (handle == null) {
       transformMode = TransformMode.translate;
@@ -1153,7 +1404,7 @@ class EditorController extends ChangeNotifier {
     }
   }
 
-  void updateTransformDrag(Vec2 currentPoint) {
+  void updateTransformDrag(Vec2 currentPoint, {double snapThresholdDoc = 5.0}) {
     if (transformDragNodeId == null ||
         transformDragStart == null ||
         transformDragInitial == null) {
@@ -1163,74 +1414,141 @@ class EditorController extends ChangeNotifier {
     final initial = transformDragInitial!;
     final b = transformDragInitialBounds ?? Bounds.empty;
     Transform2D updatedTransform = initial;
+    final guides = <SmartGuide>[];
 
     if (transformMode == TransformMode.translate) {
-      final delta = currentPoint - transformDragStart!;
+      var dx = currentPoint.x - transformDragStart!.x;
+      var dy = currentPoint.y - transformDragStart!.y;
+
+      if (smartGuidesEnabled && !b.isEmpty) {
+        final candidateTransform = initial.copyWith(
+          x: initial.x + dx,
+          y: initial.y + dy,
+        );
+        final ancestry = document.ancestry(transformDragNodeId!);
+        final parentMatrix = concatTransforms(ancestry.take(ancestry.length - 1));
+        final worldBounds = b.transformed(parentMatrix * candidateTransform.toMatrix());
+
+        // Snap to Artboard Center X / Y and Edges
+        final artCenterX = document.width / 2.0;
+        final artCenterY = document.height / 2.0;
+
+        if ((worldBounds.center.x - artCenterX).abs() <= snapThresholdDoc) {
+          dx += artCenterX - worldBounds.center.x;
+          guides.add(SmartGuide(
+            isVertical: true,
+            position: artCenterX,
+            start: 0,
+            end: document.height,
+            label: 'Center X',
+          ));
+        } else if (worldBounds.left.abs() <= snapThresholdDoc) {
+          dx += 0 - worldBounds.left;
+          guides.add(SmartGuide(
+            isVertical: true,
+            position: 0,
+            start: 0,
+            end: document.height,
+          ));
+        } else if ((worldBounds.right - document.width).abs() <= snapThresholdDoc) {
+          dx += document.width - worldBounds.right;
+          guides.add(SmartGuide(
+            isVertical: true,
+            position: document.width,
+            start: 0,
+            end: document.height,
+          ));
+        }
+
+        if ((worldBounds.center.y - artCenterY).abs() <= snapThresholdDoc) {
+          dy += artCenterY - worldBounds.center.y;
+          guides.add(SmartGuide(
+            isVertical: false,
+            position: artCenterY,
+            start: 0,
+            end: document.width,
+            label: 'Center Y',
+          ));
+        } else if (worldBounds.top.abs() <= snapThresholdDoc) {
+          dy += 0 - worldBounds.top;
+          guides.add(SmartGuide(
+            isVertical: false,
+            position: 0,
+            start: 0,
+            end: document.width,
+          ));
+        } else if ((worldBounds.bottom - document.height).abs() <= snapThresholdDoc) {
+          dy += document.height - worldBounds.bottom;
+          guides.add(SmartGuide(
+            isVertical: false,
+            position: document.height,
+            start: 0,
+            end: document.width,
+          ));
+        }
+      }
+
+      activeSmartGuides = guides;
       updatedTransform = initial.copyWith(
-        x: initial.x + delta.x,
-        y: initial.y + delta.y,
+        x: initial.x + dx,
+        y: initial.y + dy,
       );
     } else if (transformMode == TransformMode.rotate) {
       final ancestry = document.ancestry(transformDragNodeId!);
       final parentMatrix = concatTransforms(ancestry.take(ancestry.length - 1));
-      final centerDoc = (parentMatrix * initial.toMatrix()).apply(b.center);
+      final pivoted = initial.withOrigin(b.center);
+      final centerDoc = (parentMatrix * pivoted.toMatrix()).apply(b.center);
 
       final angleStart = math.atan2(transformDragStart!.y - centerDoc.y, transformDragStart!.x - centerDoc.x);
       final angleCurrent = math.atan2(currentPoint.y - centerDoc.y, currentPoint.x - centerDoc.x);
       final deltaDeg = (angleCurrent - angleStart) * 180 / math.pi;
 
-      updatedTransform = initial.copyWith(
-        originX: b.center.x,
-        originY: b.center.y,
-        rotation: (initial.rotation + deltaDeg) % 360,
+      updatedTransform = pivoted.copyWith(
+        rotation: (pivoted.rotation + deltaDeg) % 360,
       );
     } else if (transformMode == TransformMode.scale && activeHandle != null) {
       final ancestry = document.ancestry(transformDragNodeId!);
-      final fullMatrix = concatTransforms(ancestry);
+      final parentMatrix = concatTransforms(ancestry.take(ancestry.length - 1));
+      final fullMatrix = parentMatrix * initial.toMatrix();
       final inv = fullMatrix.isInvertible ? fullMatrix.inverted() : Matrix2D.identity;
       final localStart = inv.apply(transformDragStart!);
       final localCurrent = inv.apply(currentPoint);
       final delta = localCurrent - localStart;
 
-      double sx = initial.scaleX;
-      double sy = initial.scaleY;
-
       final w = b.width > 0 ? b.width : 10.0;
       final h = b.height > 0 ? b.height : 10.0;
 
-      double originX = initial.originX;
-      double originY = initial.originY;
+      double factorX = 1.0;
+      double factorY = 1.0;
+      Vec2 pivot = Vec2(initial.originX, initial.originY);
 
       switch (activeHandle!) {
         case HandleType.bottomRight:
-          originX = b.left;
-          originY = b.top;
-          sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
-          sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
+          pivot = Vec2(b.left, b.top);
+          factorX = (1 + delta.x / w).clamp(0.05, 20.0);
+          factorY = (1 + delta.y / h).clamp(0.05, 20.0);
         case HandleType.bottomLeft:
-          originX = b.right;
-          originY = b.top;
-          sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
-          sy = (initial.scaleY * (1 + delta.y / h)).clamp(0.05, 20.0);
+          pivot = Vec2(b.right, b.top);
+          factorX = (1 - delta.x / w).clamp(0.05, 20.0);
+          factorY = (1 + delta.y / h).clamp(0.05, 20.0);
         case HandleType.topRight:
-          originX = b.left;
-          originY = b.bottom;
-          sx = (initial.scaleX * (1 + delta.x / w)).clamp(0.05, 20.0);
-          sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
+          pivot = Vec2(b.left, b.bottom);
+          factorX = (1 + delta.x / w).clamp(0.05, 20.0);
+          factorY = (1 - delta.y / h).clamp(0.05, 20.0);
         case HandleType.topLeft:
-          originX = b.right;
-          originY = b.bottom;
-          sx = (initial.scaleX * (1 - delta.x / w)).clamp(0.05, 20.0);
-          sy = (initial.scaleY * (1 - delta.y / h)).clamp(0.05, 20.0);
+          pivot = Vec2(b.right, b.bottom);
+          factorX = (1 - delta.x / w).clamp(0.05, 20.0);
+          factorY = (1 - delta.y / h).clamp(0.05, 20.0);
         default:
           break;
       }
 
-      updatedTransform = initial.copyWith(
-        originX: originX,
-        originY: originY,
-        scaleX: sx,
-        scaleY: sy,
+      // Use withOrigin(pivot) so shifting from center rotation pivot to corner scale pivot
+      // compensates (x, y) and never jumps visually!
+      final pivoted = initial.withOrigin(pivot);
+      updatedTransform = pivoted.copyWith(
+        scaleX: (pivoted.scaleX * factorX).clamp(0.05, 20.0),
+        scaleY: (pivoted.scaleY * factorY).clamp(0.05, 20.0),
       );
     }
 
@@ -1281,6 +1599,68 @@ class EditorController extends ChangeNotifier {
       }
     }
 
+    // For primitive RectNode / EllipseNode without active scale animations,
+    // bake corner scaling directly into width/height (or rx/ry) so stroke width
+    // never distorts and the Properties Inspector W/H always reflects true dimensions!
+    final initNode = _transformDragInitialNode;
+    if (transformMode == TransformMode.scale &&
+        !hasAnimations &&
+        (initNode is RectNode || initNode is EllipseNode) &&
+        (initial.scaleX - 1.0).abs() < 1e-3 &&
+        (initial.scaleY - 1.0).abs() < 1e-3) {
+      final fx = updatedTransform.scaleX;
+      final fy = updatedTransform.scaleY;
+      final pivot = Vec2(updatedTransform.originX, updatedTransform.originY);
+
+      if (initNode is RectNode) {
+        final newX = pivot.x + (initNode.x - pivot.x) * fx;
+        final newY = pivot.y + (initNode.y - pivot.y) * fy;
+        final newW = (initNode.width * fx).clamp(2.0, 20000.0);
+        final newH = (initNode.height * fy).clamp(2.0, 20000.0);
+        final cleanTransform = updatedTransform.copyWith(scaleX: 1.0, scaleY: 1.0);
+        execute(
+          UpdateNodeCommand.from(
+            document,
+            nodeId,
+            (n) => (n as RectNode).copyWith(
+              x: newX,
+              y: newY,
+              width: newW,
+              height: newH,
+              transform: cleanTransform,
+            ),
+            label: 'Resize Rectangle',
+            mergeKey: 'transform-$nodeId',
+          ),
+          merge: true,
+        );
+        return;
+      } else if (initNode is EllipseNode) {
+        final newCx = pivot.x + (initNode.cx - pivot.x) * fx;
+        final newCy = pivot.y + (initNode.cy - pivot.y) * fy;
+        final newRx = (initNode.rx * fx).clamp(1.0, 10000.0);
+        final newRy = (initNode.ry * fy).clamp(1.0, 10000.0);
+        final cleanTransform = updatedTransform.copyWith(scaleX: 1.0, scaleY: 1.0);
+        execute(
+          UpdateNodeCommand.from(
+            document,
+            nodeId,
+            (n) => (n as EllipseNode).copyWith(
+              cx: newCx,
+              cy: newCy,
+              rx: newRx,
+              ry: newRy,
+              transform: cleanTransform,
+            ),
+            label: 'Resize Ellipse',
+            mergeKey: 'transform-$nodeId',
+          ),
+          merge: true,
+        );
+        return;
+      }
+    }
+
     execute(
       UpdateNodeCommand.from(
         document,
@@ -1298,14 +1678,21 @@ class EditorController extends ChangeNotifier {
     transformDragStart = null;
     transformDragInitial = null;
     transformDragInitialBounds = null;
+    _transformDragInitialNode = null;
     transformMode = null;
     activeHandle = null;
+    if (activeSmartGuides.isNotEmpty) {
+      activeSmartGuides = const [];
+      notifyListeners();
+    }
     commitMerge();
   }
 
   @override
   void dispose() {
     activeStrokeNotifier.dispose();
+    playheadNotifier.dispose();
+    isPlayingNotifier.dispose();
     _ticker?.dispose();
     super.dispose();
   }
