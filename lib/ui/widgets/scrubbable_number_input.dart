@@ -3,11 +3,13 @@ import '../theme/studio_theme.dart';
 
 /// A stateful, drag-to-scrub numeric input field for the Pro Studio Properties Inspector.
 ///
-/// Solves the StatelessWidget `TextEditingController` recreation bug:
+/// Features:
 /// - Preserves cursor position and focus while typing.
 /// - Commits edits both on keyboard submit (`onSubmitted`) AND when focus is lost.
 /// - Supports horizontal stylus/finger scrubbing across the label badge to adjust values
-///   fluidly at 120Hz with coalesced undo (`onScrubUpdate` / `onScrubEnd`).
+///   fluidly at 120Hz with coalesced undo (`onScrubEnd`).
+/// - Supports an optional inline Keyframe Diamond (`◆`) indicator & 1-tap keyframe trigger
+///   that highlights in Electric Amber-Gold (`#FBBF24`) when the property is animated/keyed.
 class ScrubbableNumberInput extends StatefulWidget {
   const ScrubbableNumberInput({
     super.key,
@@ -20,6 +22,9 @@ class ScrubbableNumberInput extends StatefulWidget {
     this.min,
     this.max,
     this.decimals = 1,
+    this.suffix = '',
+    this.isKeyframed = false,
+    this.onToggleKeyframe,
   });
 
   final String label;
@@ -31,6 +36,9 @@ class ScrubbableNumberInput extends StatefulWidget {
   final double? min;
   final double? max;
   final int decimals;
+  final String suffix;
+  final bool isKeyframed;
+  final VoidCallback? onToggleKeyframe;
 
   @override
   State<ScrubbableNumberInput> createState() => _ScrubbableNumberInputState();
@@ -69,9 +77,9 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
   String _formatValue(double v) {
     final s = v.toStringAsFixed(widget.decimals);
     if (widget.decimals > 0 && s.endsWith('.0')) {
-      return s.substring(0, s.length - 2);
+      return '${s.substring(0, s.length - 2)}${widget.suffix}';
     }
-    return s;
+    return '$s${widget.suffix}';
   }
 
   void _onFocusChange() {
@@ -81,7 +89,8 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
   }
 
   void _commitText(String text) {
-    final parsed = double.tryParse(text.trim());
+    final clean = text.replaceAll(widget.suffix, '').trim();
+    final parsed = double.tryParse(clean);
     if (parsed != null) {
       final clamped = _clamp(parsed);
       if ((clamped - widget.value).abs() > 1e-4) {
@@ -104,10 +113,18 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
   Widget build(BuildContext context) {
     final activeBorderColor = _isScrubbing
         ? StudioTheme.accentAmber
-        : (_focusNode.hasFocus ? StudioTheme.accentCyanBright : StudioTheme.obsidianBorder);
+        : (_focusNode.hasFocus
+            ? StudioTheme.accentCyanBright
+            : (widget.isKeyframed ? StudioTheme.accentAmber.withAlpha(140) : StudioTheme.obsidianBorder));
+
+    final valueColor = widget.readOnly
+        ? StudioTheme.textMuted
+        : (widget.isKeyframed || _isScrubbing
+            ? StudioTheme.accentAmberBright
+            : StudioTheme.textPrimary);
 
     return Container(
-      height: 30,
+      height: 32,
       decoration: BoxDecoration(
         color: widget.readOnly ? StudioTheme.obsidianVoid : StudioTheme.obsidianElevated,
         borderRadius: BorderRadius.circular(6),
@@ -118,6 +135,23 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
       ),
       child: Row(
         children: [
+          // Optional 1-Tap Keyframe Diamond Toggle (`◆`)
+          if (widget.onToggleKeyframe != null)
+            InkWell(
+              onTap: widget.onToggleKeyframe,
+              borderRadius: const BorderRadius.horizontal(left: Radius.circular(5)),
+              child: Padding(
+                padding: const EdgeInsets.only(left: 6, right: 2),
+                child: Icon(
+                  Icons.diamond,
+                  size: 10,
+                  color: widget.isKeyframed
+                      ? StudioTheme.accentAmberBright
+                      : StudioTheme.textMuted.withAlpha(110),
+                ),
+              ),
+            ),
+
           // Scrubbable prefix badge
           GestureDetector(
             behavior: HitTestBehavior.opaque,
@@ -156,8 +190,10 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
                 decoration: BoxDecoration(
                   color: _isScrubbing
                       ? StudioTheme.accentAmberSurface
-                      : StudioTheme.obsidianSurface,
-                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(5)),
+                      : Colors.transparent,
+                  borderRadius: widget.onToggleKeyframe == null
+                      ? const BorderRadius.horizontal(left: Radius.circular(5))
+                      : null,
                 ),
                 child: Text(
                   widget.label,
@@ -166,29 +202,31 @@ class _ScrubbableNumberInputState extends State<ScrubbableNumberInput> {
                         ? StudioTheme.accentAmberBright
                         : StudioTheme.textSecondary,
                     fontSize: 10,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w800,
                     fontFamily: 'monospace',
                   ),
                 ),
               ),
             ),
           ),
-          // Numeric Text Input
+
+          // Numeric Text Input (Right-aligned monospace like the inspiration mockup)
           Expanded(
             child: TextField(
               controller: _textController,
               focusNode: _focusNode,
               readOnly: widget.readOnly,
+              textAlign: TextAlign.right,
               style: TextStyle(
-                color: widget.readOnly ? StudioTheme.textMuted : StudioTheme.textPrimary,
+                color: valueColor,
                 fontSize: 12,
                 fontFamily: 'monospace',
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w800,
               ),
               keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
               decoration: const InputDecoration(
                 isDense: true,
-                contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 border: InputBorder.none,
               ),
               onSubmitted: _commitText,

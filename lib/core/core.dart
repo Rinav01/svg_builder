@@ -20,6 +20,7 @@ export 'geometry/transform2d.dart';
 export 'geometry/vec2.dart';
 export 'io/lottie_export.dart';
 export 'io/project_format.dart';
+export 'io/sample_projects_catalog.dart';
 export 'io/svg_export.dart';
 export 'io/svg_import.dart';
 export 'model/color.dart';

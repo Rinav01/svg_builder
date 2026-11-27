@@ -1,6 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'ui/home_screen.dart';
+import 'ui/splash_screen.dart';
 import 'ui/theme/studio_theme.dart';
 
 void main() {
@@ -21,7 +21,9 @@ void main() {
 }
 
 class SvgBuilderApp extends StatelessWidget {
-  const SvgBuilderApp({super.key});
+  const SvgBuilderApp({super.key, this.skipSplashForTests = false});
+
+  final bool skipSplashForTests;
 
   @override
   Widget build(BuildContext context) {
@@ -29,7 +31,7 @@ class SvgBuilderApp extends StatelessWidget {
       title: 'SVG Builder',
       debugShowCheckedModeBanner: false,
       theme: StudioTheme.darkTheme,
-      home: const HomeScreen(),
+      home: const SplashScreen(),
     );
   }
 }

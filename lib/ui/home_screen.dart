@@ -5,6 +5,7 @@ import '../services/compute_isolate_service.dart';
 import '../services/database/database.dart';
 import '../services/file_storage_service.dart';
 import 'editor_screen.dart';
+import 'intro_engine_screen.dart';
 import 'onboarding_guide_dialog.dart';
 import 'theme/studio_theme.dart';
 
@@ -139,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
           builder: (_) => EditorScreen(
             database: _database,
             initialProject: project,
+            initialDocument: defaultDoc,
           ),
         ),
       );
@@ -255,6 +257,7 @@ class _HomeScreenState extends State<HomeScreen> {
               builder: (_) => EditorScreen(
                 database: _database,
                 initialProject: project,
+                initialDocument: doc,
               ),
             ),
           );
@@ -270,17 +273,65 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _openProject(Project project) async {
+  Future<void> _openProject(
+    Project project, {
+    Document? preDecodedDocument,
+    bool startWithGuidedTutorial = false,
+  }) async {
+    final doc = preDecodedDocument ??
+        _summaries[project.id]?.document ??
+        await ComputeIsolateService.decodeProjectAsync(project.jsonContent);
+    if (!mounted) return;
     await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => EditorScreen(
           database: _database,
           initialProject: project,
+          initialDocument: doc,
+          startWithGuidedTutorial: startWithGuidedTutorial,
         ),
       ),
     );
     _loadProjects();
+  }
+
+  Future<void> _startGuidedAnimationLab() async {
+    final newId = 'proj_tutorial_${DateTime.now().millisecondsSinceEpoch}';
+    final tutorialDoc = SampleProjectsCatalog.buildGuidedTutorialStarterDocument();
+    final json = await ComputeIsolateService.encodeProjectAsync(tutorialDoc);
+
+    await _database.saveDraft(
+      projectId: newId,
+      name: 'Guided Animation Lab',
+      jsonContent: json,
+    );
+
+    final project = await _database.getProjectById(newId);
+    if (project != null && mounted) {
+      await _openProject(
+        project,
+        preDecodedDocument: tutorialDoc,
+        startWithGuidedTutorial: true,
+      );
+    }
+  }
+
+  Future<void> _launchSampleTemplate(SampleProjectTemplate template) async {
+    final newId = 'proj_${template.id}_${DateTime.now().millisecondsSinceEpoch}';
+    final doc = template.builder();
+    final json = await ComputeIsolateService.encodeProjectAsync(doc);
+
+    await _database.saveDraft(
+      projectId: newId,
+      name: template.title,
+      jsonContent: json,
+    );
+
+    final project = await _database.getProjectById(newId);
+    if (project != null && mounted) {
+      await _openProject(project, preDecodedDocument: doc);
+    }
   }
 
   Future<void> _duplicateProject(Project project) async {
@@ -480,9 +531,224 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: StudioTheme.accentAmber))
-          : filtered.isEmpty
-              ? _buildEmptyState()
-              : _buildProjectGrid(filtered),
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeroStudioDeck(),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? _buildEmptyState()
+                      : _buildProjectGrid(filtered),
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildHeroStudioDeck() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
+      decoration: const BoxDecoration(
+        color: StudioTheme.obsidianSurface,
+        border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              // Left Card: Interactive 6-Step Guided Animation Tutorial Lab!
+              Expanded(
+                flex: 5,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: StudioTheme.obsidianElevated,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: StudioTheme.accentAmber, width: 1.5),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.accentAmberSurface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.school, color: StudioTheme.accentAmberBright, size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'INTERACTIVE ANIMATION LAB (6-STEP GUIDE)',
+                              style: TextStyle(
+                                color: StudioTheme.accentAmberBright,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Learn & test 60 FPS keyframing, Auto-Key, Onion Skinning & Lottie export step-by-step!',
+                              style: TextStyle(color: StudioTheme.textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: StudioTheme.accentAmber,
+                          foregroundColor: StudioTheme.obsidianVoid,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+                        ),
+                        icon: const Icon(Icons.play_arrow, size: 16),
+                        label: const Text('Start Lab', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                        onPressed: _startGuidedAnimationLab,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+              // Right Card: Replay Live Vector Intro Engine
+              Expanded(
+                flex: 3,
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: StudioTheme.obsidianElevated,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: StudioTheme.accentCyan),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.accentCyanSurface,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(Icons.bolt, color: StudioTheme.accentCyanBright, size: 22),
+                      ),
+                      const SizedBox(width: 10),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'VECTOR INTRO ENGINE',
+                              style: TextStyle(
+                                color: StudioTheme.accentCyanBright,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                            SizedBox(height: 3),
+                            Text(
+                              'Watch & scrub the live 120Hz vector choreography.',
+                              style: TextStyle(color: StudioTheme.textSecondary, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: StudioTheme.accentCyanBright,
+                          side: const BorderSide(color: StudioTheme.accentCyan),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        ),
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => IntroEngineScreen(database: _database),
+                            ),
+                          );
+                        },
+                        child: const Text('Launch', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Sample Animations Showcase Strip
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                const Text(
+                  'SAMPLE ANIMATIONS:',
+                  style: TextStyle(
+                    color: StudioTheme.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                for (final sample in SampleProjectsCatalog.templates)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: InkWell(
+                      onTap: () => _launchSampleTemplate(sample),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.obsidianVoid,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: StudioTheme.obsidianBorderBright),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.play_circle_outline, size: 14, color: StudioTheme.accentAmberBright),
+                            const SizedBox(width: 6),
+                            Text(
+                              sample.title,
+                              style: const TextStyle(
+                                color: StudioTheme.textPrimary,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: StudioTheme.accentCyanSurface,
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: Text(
+                                sample.tag,
+                                style: const TextStyle(
+                                  color: StudioTheme.accentCyanBright,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w800,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -642,6 +908,36 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
+
+                    // Animated 60 FPS badge (Top Left) when project has keyframe tracks
+                    if (previewDoc != null && previewDoc.animations.isNotEmpty)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: StudioTheme.accentAmber,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.diamond, size: 9, color: StudioTheme.obsidianVoid),
+                              SizedBox(width: 3),
+                              Text(
+                                'ANIMATED',
+                                style: TextStyle(
+                                  color: StudioTheme.obsidianVoid,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                  fontFamily: 'monospace',
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
 
                     // Element count badge (Bottom Left)
                     Positioned(

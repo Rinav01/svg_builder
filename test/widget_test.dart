@@ -11,6 +11,13 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(const SvgBuilderApp());
-    expect(find.text('SVG Builder'), findsOneWidget);
+    expect(find.text('SVG BUILDER'), findsOneWidget);
+    expect(find.text('PRO STUDIO'), findsOneWidget);
+
+    // Tap SKIP to enter Intro Engine (uses continuous 60/120Hz Ticker, so use pump with duration)
+    await tester.tap(find.text('SKIP →'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(find.text('LIVE VECTOR INTRO ENGINE'), findsOneWidget);
   });
 }

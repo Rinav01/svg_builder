@@ -154,6 +154,13 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     );
   }
 
+  bool _hasTrackFor(String nodeId, AnimProperty prop) {
+    final anim = controller.document.animations[nodeId];
+    if (anim == null) return false;
+    final track = anim.tracks[prop];
+    return track != null && track.keyframes.isNotEmpty;
+  }
+
   Widget _buildNodeInspector(BuildContext context, Node node) {
     final t = node.transform;
     final b = node.localBounds;
@@ -161,29 +168,24 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     final visualW = (b.width * t.scaleX).abs();
     final visualH = (b.height * t.scaleY).abs();
 
+    final hasKeyX = _hasTrackFor(node.id, AnimProperty.x);
+    final hasKeyY = _hasTrackFor(node.id, AnimProperty.y);
+    final hasKeyRot = _hasTrackFor(node.id, AnimProperty.rotation);
+    final hasKeyOp = _hasTrackFor(node.id, AnimProperty.opacity);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Name & Identity
-        _sectionTitle('Identity'),
-        _StatefulTextRow(
-          key: ValueKey('name-${node.id}'),
-          label: 'Name',
-          value: node.name.isNotEmpty ? node.name : node.typeName,
-          onSubmitted: (val) {
-            controller.updateNode(node.id, (n) => n.withBase(name: val), label: 'Rename');
-          },
-        ),
-        const SizedBox(height: 14),
-
-        // Transform (Drag-to-Scrub Position, Size, Rotation, Opacity)
-        _sectionTitle('Transform (Drag Label to Scrub)'),
+        // Transform Space (Matching Inspiration Mockup: ◆ X / ◆ Y / W / H / ◆ ROT / OPA)
+        _sectionTitle('TRANSFORM SPACE'),
         Row(
           children: [
             Expanded(
               child: ScrubbableNumberInput(
                 label: 'X',
                 value: t.x,
+                isKeyframed: hasKeyX,
+                onToggleKeyframe: () => controller.setKeyframe(node.id, AnimProperty.x, controller.currentTime, t.x),
                 onChanged: (val, {required isScrubbing}) {
                   controller.updateAnimatableProperty(
                     node.id,
@@ -203,6 +205,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               child: ScrubbableNumberInput(
                 label: 'Y',
                 value: t.y,
+                isKeyframed: hasKeyY,
+                onToggleKeyframe: () => controller.setKeyframe(node.id, AnimProperty.y, controller.currentTime, t.y),
                 onChanged: (val, {required isScrubbing}) {
                   controller.updateAnimatableProperty(
                     node.id,
@@ -300,8 +304,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           children: [
             Expanded(
               child: ScrubbableNumberInput(
-                label: 'R°',
+                label: 'ROT',
                 value: t.rotation,
+                suffix: '°',
+                isKeyframed: hasKeyRot,
+                onToggleKeyframe: () => controller.setKeyframe(node.id, AnimProperty.rotation, controller.currentTime, t.rotation),
                 onChanged: (val, {required isScrubbing}) {
                   controller.updateAnimatableProperty(
                     node.id,
@@ -319,11 +326,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             const SizedBox(width: 8),
             Expanded(
               child: ScrubbableNumberInput(
-                label: 'Op%',
+                label: 'OPA',
                 value: (node.opacity * 100).roundToDouble(),
                 min: 0.0,
                 max: 100.0,
                 decimals: 0,
+                suffix: '%',
+                isKeyframed: hasKeyOp,
+                onToggleKeyframe: () => controller.setKeyframe(node.id, AnimProperty.opacity, controller.currentTime, node.opacity),
                 onChanged: (val, {required isScrubbing}) {
                   final op = (val / 100.0).clamp(0.0, 1.0);
                   controller.updateAnimatableProperty(
@@ -360,12 +370,12 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           const SizedBox(height: 12),
         ],
 
-        // Shape Appearance (Fill & Stroke)
+        // Shape Appearance (Fill, Stroke & Blend Mode Card Layout matching inspiration mockup)
         if (node is ShapeNode) ...[
-          _sectionTitle('Appearance'),
+          _sectionTitle('APPEARANCE'),
           _colorPickerRow(
             context: context,
-            label: 'Fill',
+            label: 'FILL',
             color: node.style.fill,
             enabled: node.style.hasFill,
             docColors: docColors,
@@ -387,13 +397,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               );
             },
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           _colorPickerRow(
             context: context,
-            label: 'Stroke',
+            label: 'STROKE',
             color: node.style.stroke,
             enabled: node.style.hasStroke,
             docColors: docColors,
+            trailingPillText: node.style.hasStroke ? '${node.style.strokeWidth.toStringAsFixed(1)}px' : null,
             onToggle: (has) {
               final newStroke = has ? (node.style.stroke ?? const RgbaColor(0xFF000000)) : null;
               controller.updateNode(
@@ -413,7 +424,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             },
           ),
           if (node.style.hasStroke) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             _sliderRow(
               label: 'Width',
               value: node.style.strokeWidth,
@@ -434,7 +445,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             ),
           ],
           if (node is RectNode) ...[
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             _sliderRow(
               label: 'Radius',
               value: node.cornerRadius,
@@ -452,8 +463,61 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               onChangeEnd: (_) => controller.commitMerge(),
             ),
           ],
-          const SizedBox(height: 14),
+          const SizedBox(height: 6),
+          // Blend Mode Row (Pass-Through)
+          Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: StudioTheme.obsidianElevated,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: StudioTheme.obsidianBorder),
+            ),
+            child: Row(
+              children: [
+                const Text(
+                  'BLEND MODE',
+                  style: TextStyle(
+                    color: StudioTheme.textSecondary,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: StudioTheme.obsidianVoid,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: StudioTheme.obsidianBorder),
+                  ),
+                  child: const Text(
+                    'Pass-Through',
+                    style: TextStyle(
+                      color: StudioTheme.textPrimary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
         ],
+
+        // Identity Row
+        _sectionTitle('IDENTITY'),
+        _StatefulTextRow(
+          key: ValueKey('name-${node.id}'),
+          label: 'Name',
+          value: node.name.isNotEmpty ? node.name : node.typeName,
+          onSubmitted: (val) {
+            controller.updateNode(node.id, (n) => n.withBase(name: val), label: 'Rename');
+          },
+        ),
+        const SizedBox(height: 12),
 
         // Typography (for TextNode)
         if (node is TextNode) ...[
@@ -746,60 +810,126 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     required List<RgbaColor> docColors,
     required void Function(bool) onToggle,
     required void Function(RgbaColor) onPick,
+    String? trailingPillText,
   }) {
     final uiColor = color?.toUiColor() ?? Colors.transparent;
 
-    return Row(
-      children: [
-        SizedBox(
-          width: 64,
-          child: Text(label, style: const TextStyle(color: StudioTheme.textSecondary, fontSize: 12)),
-        ),
-        Checkbox(
-          value: enabled,
-          activeColor: StudioTheme.accentCyan,
-          checkColor: StudioTheme.obsidianVoid,
-          onChanged: (val) => onToggle(val ?? false),
-          visualDensity: VisualDensity.compact,
-        ),
-        const SizedBox(width: 4),
-        GestureDetector(
-          onTap: enabled
-              ? () async {
-                  final picked = await ColorPickerDialog.show(
-                    context,
-                    initialColor: color ?? const RgbaColor(0xFF000000),
-                    title: 'Pick $label Color',
-                    documentColors: docColors,
-                  );
-                  if (picked != null) onPick(picked);
-                }
-              : null,
-          child: Container(
-            width: 48,
-            height: 24,
-            decoration: BoxDecoration(
-              color: enabled ? uiColor : StudioTheme.obsidianVoid,
-              borderRadius: BorderRadius.circular(5),
-              border: Border.all(
-                color: enabled ? StudioTheme.accentCyan : StudioTheme.obsidianBorder,
-                width: 1.2,
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: StudioTheme.obsidianElevated,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: StudioTheme.obsidianBorder),
+      ),
+      child: Row(
+        children: [
+          GestureDetector(
+            onTap: () async {
+              if (!enabled) {
+                onToggle(true);
+                return;
+              }
+              final picked = await ColorPickerDialog.show(
+                context,
+                initialColor: color ?? const RgbaColor(0xFF06B6D4),
+                title: 'Pick $label Color',
+                documentColors: docColors,
+              );
+              if (picked != null) onPick(picked);
+            },
+            child: Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: enabled ? uiColor : StudioTheme.obsidianVoid,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                  color: enabled ? StudioTheme.accentCyanBright : StudioTheme.obsidianBorderBright,
+                  width: 1.2,
+                ),
               ),
+              child: !enabled
+                  ? const Icon(Icons.close, size: 12, color: StudioTheme.textMuted)
+                  : null,
             ),
           ),
-        ),
-        if (enabled && color != null) ...[
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Text(
-            color.toHexRgb().toUpperCase(),
+            label.toUpperCase(),
             style: const TextStyle(
               color: StudioTheme.textSecondary,
-              fontSize: 11,
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
               fontFamily: 'monospace',
             ),
           ),
+          const Spacer(),
+          if (enabled && color != null)
+            GestureDetector(
+              onTap: () async {
+                final picked = await ColorPickerDialog.show(
+                  context,
+                  initialColor: color,
+                  title: 'Pick $label Color',
+                  documentColors: docColors,
+                );
+                if (picked != null) onPick(picked);
+              },
+              child: Text(
+                color.toHexRgb().toUpperCase(),
+                style: const TextStyle(
+                  color: StudioTheme.accentCyanBright,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            )
+          else
+            TextButton(
+              onPressed: () => onToggle(true),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'NONE',
+                style: TextStyle(color: StudioTheme.textMuted, fontSize: 10, fontFamily: 'monospace'),
+              ),
+            ),
+          if (trailingPillText != null) ...[
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: StudioTheme.obsidianVoid,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: StudioTheme.obsidianBorder),
+              ),
+              child: Text(
+                trailingPillText,
+                style: const TextStyle(
+                  color: StudioTheme.textSecondary,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: () => onToggle(!enabled),
+            child: Icon(
+              enabled ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+              size: 14,
+              color: enabled ? StudioTheme.textSecondary : StudioTheme.textMuted,
+            ),
+          ),
         ],
-      ],
+      ),
     );
   }
 

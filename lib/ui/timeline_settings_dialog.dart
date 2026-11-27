@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'editor_controller.dart';
+import 'theme/studio_theme.dart';
 
 /// Modal dialog for configuring timeline settings (Duration, FPS, Loop, and Frame Snapping).
 class TimelineSettingsDialog extends StatefulWidget {
@@ -61,8 +62,11 @@ class _TimelineSettingsDialogState extends State<TimelineSettingsDialog> {
     final totalFrames = (durVal * _fps).round();
 
     return Dialog(
-      backgroundColor: const Color(0xFF222222),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      backgroundColor: StudioTheme.obsidianElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: StudioTheme.obsidianBorder),
+      ),
       child: Container(
         width: 380,
         padding: const EdgeInsets.all(20),
@@ -73,12 +77,12 @@ class _TimelineSettingsDialogState extends State<TimelineSettingsDialog> {
             // Header
             Row(
               children: [
-                const Icon(Icons.tune, color: Colors.blueAccent, size: 22),
+                const Icon(Icons.tune, color: StudioTheme.accentCyanBright, size: 22),
                 const SizedBox(width: 8),
                 const Text(
                   'Timeline Settings',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: StudioTheme.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
@@ -186,17 +190,17 @@ class _TimelineSettingsDialogState extends State<TimelineSettingsDialog> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+                  child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
+                    backgroundColor: StudioTheme.accentAmber,
+                    foregroundColor: StudioTheme.obsidianVoid,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   onPressed: _save,
-                  child: const Text('Save Settings'),
+                  child: const Text('Save Settings', style: TextStyle(fontWeight: FontWeight.w900)),
                 ),
               ],
             ),

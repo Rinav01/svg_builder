@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="144dp"
+    android:height="144dp"
+    android:viewportWidth="144"
+    android:viewportHeight="144">
+
+    <!-- Outer Obsidian Badge Container -->
+    <path
+        android:fillColor="#161B22"
+        android:strokeColor="#2A3442"
+        android:strokeWidth="2"
+        android:pathData="M32,12 L112,12 A20,20 0 0,1 132,32 L132,112 A20,20 0 0,1 112,132 L32,132 A20,20 0 0,1 12,112 L12,32 A20,20 0 0,1 32,12 Z" />
+
+    <!-- Cool Teal-Cyan Bezier Orbit Ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#06B6D4"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:pathData="M34,98 C34,48 110,48 110,98" />
+
+    <!-- Bezier Handle Tangent Line -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#22D3EE"
+        android:strokeWidth="2"
+        android:pathData="M36,56 L108,56" />
+
+    <!-- Left & Right Cyan Control Anchor Nodes -->
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M36,56 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:fillColor="#22D3EE"
+        android:pathData="M108,56 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+
+    <!-- Shining Electric Amber-Gold Center Keyframe Diamond & Pen Nib Emblem -->
+    <path
+        android:fillColor="#F59E0B"
+        android:strokeColor="#FBBF24"
+        android:strokeWidth="2"
+        android:pathData="M72,34 L94,64 L72,110 L50,64 Z" />
+
+    <!-- Inner Nib Slit & Eyelet in Obsidian Void -->
+    <path
+        android:fillColor="#0F1217"
+        android:pathData="M72,58 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0" />
+    <path
+        android:strokeColor="#0F1217"
+        android:strokeWidth="2.5"
+        android:pathData="M72,34 L72,54" />
+</vector>

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../core/core.dart';
 import '../render/render_adapters.dart';
+import 'theme/studio_theme.dart';
 
 /// Interactive HSV + Hex Color Picker dialog and bottom sheet for tablet artist workflow.
 class ColorPickerDialog extends StatefulWidget {
@@ -133,10 +134,10 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
     final currentUiColor = currentColor.toUiColor();
 
     return AlertDialog(
-      backgroundColor: const Color(0xFF252525),
+      backgroundColor: StudioTheme.obsidianElevated,
       title: Text(
         widget.title,
-        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        style: const TextStyle(color: StudioTheme.textPrimary, fontSize: 16, fontWeight: FontWeight.bold),
       ),
       content: SizedBox(
         width: 320,
@@ -309,12 +310,15 @@ class _ColorPickerDialogState extends State<ColorPickerDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+          child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(_currentColor),
-          style: FilledButton.styleFrom(backgroundColor: Colors.blueAccent),
-          child: const Text('Select'),
+          style: FilledButton.styleFrom(
+            backgroundColor: StudioTheme.accentAmber,
+            foregroundColor: StudioTheme.obsidianVoid,
+          ),
+          child: const Text('Apply Color', style: TextStyle(fontWeight: FontWeight.w900)),
         ),
       ],
     );

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' hide Easing;
 import '../core/core.dart';
+import 'theme/studio_theme.dart';
 
 /// Interactive modal dialog for selecting and previewing animation keyframe easing curves.
 class EasingPickerDialog extends StatefulWidget {
@@ -86,8 +87,11 @@ class _EasingPickerDialogState extends State<EasingPickerDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF222222),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      backgroundColor: StudioTheme.obsidianElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: StudioTheme.obsidianBorder),
+      ),
       child: Container(
         width: 440,
         padding: const EdgeInsets.all(20),
@@ -98,19 +102,19 @@ class _EasingPickerDialogState extends State<EasingPickerDialog> {
             // Header
             Row(
               children: [
-                const Icon(Icons.show_chart, color: Colors.blueAccent, size: 22),
+                const Icon(Icons.show_chart, color: StudioTheme.accentCyanBright, size: 22),
                 const SizedBox(width: 8),
                 const Text(
                   'Keyframe Easing',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: StudioTheme.textPrimary,
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 const Spacer(),
                 IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white60, size: 18),
+                  icon: const Icon(Icons.close, color: StudioTheme.textSecondary, size: 18),
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () => Navigator.pop(context),
@@ -125,9 +129,9 @@ class _EasingPickerDialogState extends State<EasingPickerDialog> {
                 width: 220,
                 height: 160,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF141414),
+                  color: StudioTheme.obsidianVoid,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.white12),
+                  border: Border.all(color: StudioTheme.obsidianBorder),
                 ),
                 child: CustomPaint(
                   painter: _CurvePreviewPainter(
@@ -207,17 +211,17 @@ class _EasingPickerDialogState extends State<EasingPickerDialog> {
               children: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+                  child: const Text('Cancel', style: TextStyle(color: StudioTheme.textSecondary)),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
+                    backgroundColor: StudioTheme.accentAmber,
+                    foregroundColor: StudioTheme.obsidianVoid,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
                   onPressed: () => Navigator.pop(context, _currentEasing),
-                  child: const Text('Apply Easing'),
+                  child: const Text('Apply Easing', style: TextStyle(fontWeight: FontWeight.w900)),
                 ),
               ],
             ),
@@ -234,13 +238,13 @@ class _EasingPickerDialogState extends State<EasingPickerDialog> {
         label,
         style: TextStyle(
           fontSize: 11,
-          color: isSelected ? Colors.white : Colors.white70,
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          color: isSelected ? StudioTheme.obsidianVoid : StudioTheme.textSecondary,
+          fontWeight: isSelected ? FontWeight.w900 : FontWeight.normal,
         ),
       ),
       selected: isSelected,
-      selectedColor: Colors.blueAccent,
-      backgroundColor: const Color(0xFF2C2C2C),
+      selectedColor: StudioTheme.accentCyanBright,
+      backgroundColor: StudioTheme.obsidianSurface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
       onSelected: (_) => _applyPreset(key),

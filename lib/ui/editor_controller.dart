@@ -396,6 +396,45 @@ class EditorController extends ChangeNotifier {
     }
   }
 
+  /// Records a complete transform pose (`x`, `y`, `rotation`, `scaleX`, `scaleY`)
+  /// for all selected nodes at [currentTime] in a single undoable [BatchCommand].
+  void keyCurrentPoseForSelected({Easing easing = Easing.easeInOut}) {
+    if (_selectedNodeIds.isEmpty) return;
+    final commands = <Command>[];
+    String? firstId;
+
+    for (final id in _selectedNodeIds) {
+      final node = renderedDocument.findById(id) ?? document.findById(id);
+      if (node == null) continue;
+      firstId ??= id;
+      final t = node.transform;
+      final props = <(AnimProperty, double)>[
+        (AnimProperty.x, t.x),
+        (AnimProperty.y, t.y),
+        (AnimProperty.rotation, t.rotation),
+        (AnimProperty.scaleX, t.scaleX),
+        (AnimProperty.scaleY, t.scaleY),
+      ];
+      for (final (prop, val) in props) {
+        commands.add(
+          SetTrackCommand.setKeyframe(
+            document,
+            id,
+            prop,
+            Keyframe(_currentTime, val, easing: easing),
+          ),
+        );
+      }
+    }
+
+    if (commands.isNotEmpty) {
+      execute(BatchCommand('Key All Pose', commands), merge: false);
+      if (firstId != null) {
+        selectKeyframe(firstId, AnimProperty.x, _currentTime);
+      }
+    }
+  }
+
   void setKeyframe(String nodeId, AnimProperty property, double time, double value, {Easing easing = Easing.easeInOut}) {
     if (!document.contains(nodeId)) return;
     final cmd = SetTrackCommand.setKeyframe(

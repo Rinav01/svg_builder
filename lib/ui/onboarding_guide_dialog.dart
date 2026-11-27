@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'theme/studio_theme.dart';
 
 /// Interactive onboarding modal illustrating tablet gestures and S Pen mechanics.
 class OnboardingGuideDialog extends StatefulWidget {
@@ -64,8 +65,11 @@ class _OnboardingGuideDialogState extends State<OnboardingGuideDialog> {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF222222),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      backgroundColor: StudioTheme.obsidianElevated,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: StudioTheme.obsidianBorder),
+      ),
       child: Container(
         width: 460,
         height: 380,
@@ -150,8 +154,8 @@ class _OnboardingGuideDialogState extends State<OnboardingGuideDialog> {
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
+                    backgroundColor: StudioTheme.accentAmber,
+                    foregroundColor: StudioTheme.obsidianVoid,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () {
@@ -164,7 +168,10 @@ class _OnboardingGuideDialogState extends State<OnboardingGuideDialog> {
                       Navigator.pop(context);
                     }
                   },
-                  child: Text(_currentPage < _pages.length - 1 ? 'Next' : "Got it, Let's Draw!"),
+                  child: Text(
+                    _currentPage < _pages.length - 1 ? 'Next' : "Got it, Let's Draw!",
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                 ),
               ],
             ),

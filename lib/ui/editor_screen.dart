@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../config/feature_flags.dart';
 import '../core/core.dart';
 import '../services/collaboration/collaboration_service.dart';
+import '../services/compute_isolate_service.dart';
 import '../services/database/auto_save_service.dart';
 import '../services/database/database.dart';
 import '../services/file_storage_service.dart';
@@ -16,16 +17,22 @@ import 'onboarding_guide_dialog.dart';
 import 'right_sidebar.dart';
 import 'theme/studio_theme.dart';
 import 'timeline_view.dart';
+import 'tutorial/interactive_tutorial_controller.dart';
+import 'tutorial/interactive_tutorial_overlay.dart';
 
 class EditorScreen extends StatefulWidget {
   const EditorScreen({
     super.key,
     this.database,
     this.initialProject,
+    this.initialDocument,
+    this.startWithGuidedTutorial = false,
   });
 
   final AppDatabase? database;
   final Project? initialProject;
+  final Document? initialDocument;
+  final bool startWithGuidedTutorial;
 
   @override
   State<EditorScreen> createState() => _EditorScreenState();
@@ -34,6 +41,7 @@ class EditorScreen extends StatefulWidget {
 class _EditorScreenState extends State<EditorScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final EditorController _controller;
+  late final InteractiveTutorialController _tutorialController;
   late final AppDatabase _database;
   late final AutoSaveService _autoSaveService;
   CollaborationService? _collabService;
@@ -50,15 +58,21 @@ class _EditorScreenState extends State<EditorScreen>
     if (widget.initialProject != null) {
       _autoSaveService.currentProjectId = widget.initialProject!.id;
       _autoSaveService.currentProjectName = widget.initialProject!.name;
-      final doc = ProjectFormat.decode(widget.initialProject!.jsonContent);
+      final doc = widget.initialDocument ?? ProjectFormat.decode(widget.initialProject!.jsonContent);
       _controller = EditorController(doc);
       _controller.setDocumentName(widget.initialProject!.name);
+    } else if (widget.initialDocument != null) {
+      _controller = EditorController(widget.initialDocument);
     } else {
       _controller = EditorController();
       _checkRestoreDraft();
     }
 
     _controller.attachTickerProvider(this);
+    _tutorialController = InteractiveTutorialController(_controller);
+    if (widget.startWithGuidedTutorial) {
+      _tutorialController.startTutorial();
+    }
 
     if (FeatureFlags.enableCollaboration) {
       final randomId = 'user_${DateTime.now().millisecondsSinceEpoch % 10000}';
@@ -106,7 +120,8 @@ class _EditorScreenState extends State<EditorScreen>
     try {
       final latest = await _database.getLatestDraft();
       if (latest != null && mounted) {
-        final doc = ProjectFormat.decode(latest.jsonContent);
+        final doc = await ComputeIsolateService.decodeProjectAsync(latest.jsonContent);
+        if (!mounted) return;
         // If the latest saved draft has content (e.g. shapes), prompt or restore
         if (doc.layers.isNotEmpty && doc.layers.any((l) => l is GroupNode && l.children.isNotEmpty)) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -177,6 +192,7 @@ class _EditorScreenState extends State<EditorScreen>
     if (widget.database == null) {
       _database.close();
     }
+    _tutorialController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -603,6 +619,60 @@ class _EditorScreenState extends State<EditorScreen>
                 foregroundColor: StudioTheme.textPrimary,
                 shape: const Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
                 actions: [
+                  // Guided Animation Lab Toggle Pill in Shining Electric Amber-Gold!
+                  ListenableBuilder(
+                    listenable: _tutorialController,
+                    builder: (context, _) {
+                      final active = _tutorialController.isActive;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                        child: InkWell(
+                          onTap: () {
+                            if (active) {
+                              _tutorialController.closeTutorial();
+                            } else {
+                              _tutorialController.startTutorial();
+                            }
+                          },
+                          borderRadius: BorderRadius.circular(6),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: active
+                                  ? StudioTheme.accentAmber
+                                  : StudioTheme.accentAmberSurface,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: StudioTheme.accentAmber),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.school,
+                                  size: 14,
+                                  color: active
+                                      ? StudioTheme.obsidianVoid
+                                      : StudioTheme.accentAmberBright,
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  active ? 'LAB GUIDE: ON' : 'ANIMATION GUIDE',
+                                  style: TextStyle(
+                                    color: active
+                                        ? StudioTheme.obsidianVoid
+                                        : StudioTheme.accentAmberBright,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900,
+                                    fontFamily: 'monospace',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                   ListenableBuilder(
                     listenable: _controller,
                     builder: (context, _) => Row(
@@ -619,6 +689,36 @@ class _EditorScreenState extends State<EditorScreen>
                           onPressed: _controller.canRedo ? _controller.redo : null,
                         ),
                       ],
+                    ),
+                  ),
+                  // Prominent Cyan `⚡ Export Lottie` Pill Button (Matches Inspiration Mockup)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+                    child: InkWell(
+                      onTap: _exportLottie,
+                      borderRadius: BorderRadius.circular(7),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: StudioTheme.accentCyanBright,
+                          borderRadius: BorderRadius.circular(7),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.bolt, size: 15, color: StudioTheme.obsidianVoid),
+                            SizedBox(width: 4),
+                            Text(
+                              'Export Lottie',
+                              style: TextStyle(
+                                color: StudioTheme.obsidianVoid,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   IconButton(
@@ -756,47 +856,91 @@ class _EditorScreenState extends State<EditorScreen>
               ),
               body: LayoutBuilder(
                 builder: (context, constraints) {
-                  final isNarrow = constraints.maxWidth < 800;
+                  final isPortraitOrNarrow = constraints.maxWidth < 860;
 
+                  if (isPortraitOrNarrow) {
+                    // Tablet Portrait / Split-Screen Layout matching Inspiration Image 2:
+                    // [Horizontal Tool Ribbon] -> [Canvas + Tutorial Coach] -> [Inline Inspector] -> [Timeline]
+                    return Column(
+                      children: [
+                        _buildHorizontalToolRibbon(),
+                        Expanded(
+                          flex: _showSidebar ? 5 : 9,
+                          child: ClipRect(
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                CanvasView(controller: _controller),
+                                InteractiveTutorialOverlay(
+                                  tutorialController: _tutorialController,
+                                  onExportLottie: _exportLottie,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_showSidebar)
+                          Expanded(
+                            flex: 4,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                border: Border(top: BorderSide(color: StudioTheme.obsidianBorder)),
+                              ),
+                              child: RightSidebar(
+                                controller: _controller,
+                                width: double.infinity,
+                                onClose: () => setState(() => _showSidebar = false),
+                              ),
+                            ),
+                          ),
+                        SafeArea(
+                          top: false,
+                          left: false,
+                          right: false,
+                          bottom: true,
+                          child: TimelineView(controller: _controller),
+                        ),
+                      ],
+                    );
+                  }
+
+                  // Tablet Landscape Layout (`>= 860dp`, e.g., TB336FU 2560x1600):
+                  // [Left Vertical Stylus Dock] | [Center Infinite Canvas + Coach] | [Right Docked Inspector]
                   return Column(
                     children: [
                       Expanded(
-                        child: Stack(
+                        child: Row(
                           children: [
-                            Row(
-                              children: [
-                                _buildToolPalette(),
-                                Expanded(
-                                  child: ClipRect(
-                                    child: CanvasView(controller: _controller),
-                                  ),
+                            _buildToolPalette(),
+                            Expanded(
+                              child: ClipRect(
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    CanvasView(controller: _controller),
+                                    InteractiveTutorialOverlay(
+                                      tutorialController: _tutorialController,
+                                      onExportLottie: _exportLottie,
+                                    ),
+                                  ],
                                 ),
-                                if (_showSidebar && !isNarrow)
-                                  RightSidebar(
-                                    controller: _controller,
-                                    onClose: () => setState(() => _showSidebar = false),
-                                  ),
-                              ],
+                              ),
                             ),
-
-                            // Overlay sliding sidebar on narrow / portrait / split-screen
-                            if (_showSidebar && isNarrow)
-                              Positioned(
-                                top: 0,
-                                bottom: 0,
-                                right: 0,
-                                child: Material(
-                                  elevation: 16,
-                                  child: RightSidebar(
-                                    controller: _controller,
-                                    onClose: () => setState(() => _showSidebar = false),
-                                  ),
-                                ),
+                            if (_showSidebar)
+                              RightSidebar(
+                                controller: _controller,
+                                onClose: () => setState(() => _showSidebar = false),
                               ),
                           ],
                         ),
                       ),
-                      TimelineView(controller: _controller),
+                      SafeArea(
+                        top: false,
+                        left: false,
+                        right: false,
+                        bottom: true,
+                        child: TimelineView(controller: _controller),
+                      ),
                     ],
                   );
                 },
@@ -808,12 +952,108 @@ class _EditorScreenState extends State<EditorScreen>
     );
   }
 
+  Widget _buildHorizontalToolRibbon() {
+    return ListenableBuilder(
+      listenable: _controller,
+      builder: (context, _) {
+        return Container(
+          height: 54,
+          decoration: const BoxDecoration(
+            color: StudioTheme.obsidianSurface,
+            border: Border(bottom: BorderSide(color: StudioTheme.obsidianBorder)),
+          ),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Row(
+              children: [
+                _horizontalToolTile(Icons.near_me_outlined, 'SELECT (V)', EditorTool.select),
+                _horizontalToolTile(Icons.gesture, 'NODES (A)', EditorTool.nodeEdit),
+                _horizontalToolTile(Icons.edit_outlined, 'S-PEN (P)', EditorTool.pen),
+                _horizontalToolTile(Icons.auto_fix_normal_outlined, 'ERASER (E)', EditorTool.eraser),
+                _horizontalToolTile(Icons.crop_square, 'RECT (R)', EditorTool.rectangle),
+                _horizontalToolTile(Icons.circle_outlined, 'OVAL (O)', EditorTool.ellipse),
+                _horizontalToolTile(Icons.title, 'TEXT (T)', EditorTool.text),
+                const VerticalDivider(color: StudioTheme.obsidianBorder, width: 16, indent: 6, endIndent: 6),
+                IconButton(
+                  icon: Icon(
+                    _controller.penOnlyMode ? Icons.draw : Icons.touch_app,
+                    color: _controller.penOnlyMode ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
+                    size: 18,
+                  ),
+                  tooltip: 'Toggle Pen-Only vs Touch Inking',
+                  onPressed: () {
+                    setState(() {
+                      _controller.penOnlyMode = !_controller.penOnlyMode;
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _horizontalToolTile(IconData icon, String label, EditorTool tool) {
+    final isSelected = _controller.currentTool == tool;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 3),
+      child: InkWell(
+        onTap: () => _controller.currentTool = tool,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: isSelected ? StudioTheme.accentCyan : Colors.transparent,
+            ),
+          ),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    icon,
+                    size: 16,
+                    color: isSelected ? StudioTheme.accentCyanBright : StudioTheme.textSecondary,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textMuted,
+                      fontSize: 8,
+                      fontWeight: FontWeight.w900,
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ),
+              if (isSelected)
+                const Positioned(
+                  top: -2,
+                  right: -4,
+                  child: Icon(Icons.circle, size: 6, color: StudioTheme.accentAmberBright),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildToolPalette() {
     return ListenableBuilder(
       listenable: _controller,
       builder: (context, _) {
         return Container(
-          width: 66,
+          width: 74,
           decoration: const BoxDecoration(
             color: StudioTheme.obsidianSurface,
             border: Border(right: BorderSide(color: StudioTheme.obsidianBorder)),
@@ -821,39 +1061,46 @@ class _EditorScreenState extends State<EditorScreen>
           child: SingleChildScrollView(
             child: Column(
               children: [
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 _toolButton(
                   icon: Icons.near_me_outlined,
+                  label: 'SELECT',
                   tool: EditorTool.select,
                   tooltip: 'Select / Marquee Move (V)',
                 ),
                 _toolButton(
                   icon: Icons.timeline,
+                  label: 'NODES',
                   tool: EditorTool.nodeEdit,
                   tooltip: 'Edit Nodes (Anchor & Control Points)',
                 ),
                 _toolButton(
                   icon: Icons.edit_outlined,
+                  label: 'S-PEN',
                   tool: EditorTool.pen,
                   tooltip: 'Stylus Freehand Pen (P)',
                 ),
                 _toolButton(
                   icon: Icons.auto_fix_normal_outlined,
+                  label: 'ERASER',
                   tool: EditorTool.eraser,
                   tooltip: 'Stroke Eraser (E)',
                 ),
                 _toolButton(
                   icon: Icons.crop_square,
+                  label: 'RECT',
                   tool: EditorTool.rectangle,
                   tooltip: 'Rectangle (R)',
                 ),
                 _toolButton(
                   icon: Icons.circle_outlined,
+                  label: 'OVAL',
                   tool: EditorTool.ellipse,
                   tooltip: 'Ellipse (O)',
                 ),
                 _toolButton(
                   icon: Icons.title,
+                  label: 'TEXT',
                   tool: EditorTool.text,
                   tooltip: 'Text Label (T)',
                 ),
@@ -882,7 +1129,7 @@ class _EditorScreenState extends State<EditorScreen>
                     );
                   },
                 ),
-                // Brush size quick scrubber badge
+                // Live Dynamic Brush Preview Orb + Vertical Scrubber
                 GestureDetector(
                   onVerticalDragUpdate: (details) {
                     setState(() {
@@ -893,25 +1140,45 @@ class _EditorScreenState extends State<EditorScreen>
                     message: 'Brush Size: ${_controller.brushSize.toInt()}px (Drag vertically to adjust)',
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                       decoration: BoxDecoration(
                         color: StudioTheme.obsidianElevated,
-                        borderRadius: BorderRadius.circular(5),
+                        borderRadius: BorderRadius.circular(8),
                         border: Border.all(color: StudioTheme.obsidianBorder),
                       ),
-                      child: Text(
-                        '${_controller.brushSize.toInt()}px',
-                        style: const TextStyle(
-                          color: StudioTheme.accentAmberBright,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          fontFamily: 'monospace',
-                        ),
+                      child: Column(
+                        children: [
+                          SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: Center(
+                              child: Container(
+                                width: _controller.brushSize.clamp(4.0, 26.0),
+                                height: _controller.brushSize.clamp(4.0, 26.0),
+                                decoration: BoxDecoration(
+                                  color: Color(_controller.primaryColor.value),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: StudioTheme.accentCyanBright, width: 1.0),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '${_controller.brushSize.toInt()}px',
+                            style: const TextStyle(
+                              color: StudioTheme.accentAmberBright,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-                const Divider(color: StudioTheme.obsidianBorder, height: 18),
+                const Divider(color: StudioTheme.obsidianBorder, height: 16),
                 ..._colorSwatches(),
                 const SizedBox(height: 12),
               ],
@@ -924,30 +1191,49 @@ class _EditorScreenState extends State<EditorScreen>
 
   Widget _toolButton({
     required IconData icon,
+    required String label,
     required EditorTool tool,
     required String tooltip,
   }) {
     final isSelected = _controller.currentTool == tool;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: InkWell(
-        onTap: () => _controller.currentTool = tool,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 44,
-          height: 40,
-          decoration: BoxDecoration(
-            color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: isSelected ? StudioTheme.accentAmber : Colors.transparent,
-              width: 1.5,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
+          onTap: () => _controller.currentTool = tool,
+          borderRadius: BorderRadius.circular(8),
+          child: Container(
+            width: 58,
+            height: 46,
+            decoration: BoxDecoration(
+              color: isSelected ? StudioTheme.accentCyanSurface : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: isSelected ? StudioTheme.accentAmber : Colors.transparent,
+                width: 1.5,
+              ),
             ),
-          ),
-          child: Icon(
-            icon,
-            size: 20,
-            color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 18,
+                  color: isSelected ? StudioTheme.accentAmberBright : StudioTheme.textSecondary,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  style: TextStyle(
+                    color: isSelected ? StudioTheme.textPrimary : StudioTheme.textMuted,
+                    fontSize: 8,
+                    fontWeight: isSelected ? FontWeight.w900 : FontWeight.w700,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
